@@ -9,8 +9,8 @@ host your own agent sandbox env using latitube baremetal vm with a control plane
 - [] Scheduling system for placing workloads across the cluster
 - [] x402 payment integration
 
+## Design
 ```
-
 ┌─────────────────────────────────────────────────────────────┐
 │                    AI Agent Clients                         │
 │              (x402 payment in X-PAYMENT header)             │
