@@ -5,9 +5,9 @@ host your own agent sandbox env using latitube baremetal vm with a control plane
 
 ## Status
 - [x] Terraform to provision clusters
-    - [] Firecracker setup on provisioned nodes
-- [] Scheduling system for placing workloads across the cluster
-- [] x402 payment integration
+    - [ ] Firecracker setup on provisioned nodes
+- [ ] Scheduling system for placing workloads across the cluster
+- [ ] x402 payment integration
 
 ## Design
 ```
