@@ -1,0 +1,4 @@
+[tools]
+"aqua:dotenvx/dotenvx" = "1.48.4"
+prek = "0.3.2"
+terraform = "1.14.5"
