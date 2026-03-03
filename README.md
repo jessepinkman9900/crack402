@@ -3,7 +3,7 @@
 host your own agent sandbox env using latitube baremetal vm with a control plane deployed on cloudflare workers
 
 
-## Status
+## Progress
 - [x] Terraform to provision clusters
     - [ ] Firecracker setup on provisioned nodes
 - [ ] Scheduling system for placing workloads across the cluster
