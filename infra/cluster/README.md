@@ -27,6 +27,7 @@ export LATITUDE_API_KEY="<your_api_key>" terraform destroy
 
 ## Notes
 - node count behaviour
+  - 0 is valid value
   - if you bump up count from 1 to 2, terraform will create a new node and add it to the cluster
   - if you reduce count from 2 to 1, terraform will destroy the latest node that was created i.e node-2
 

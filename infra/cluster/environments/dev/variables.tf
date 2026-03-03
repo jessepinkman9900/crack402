@@ -29,7 +29,7 @@ variable "provisioning_type" {
 variable "region" {
   type        = string
   default     = "CHI"
-  description = "Region slug for latitude.sh - CHI, MIA, DAL, LAX, NYX, LON, SAO, TYO"
+  description = "Region slug for latitude.sh - CHI, MIA, DAL, LAX, NYC, LON, SAO, TYO"
 }
 
 variable "cluster_config" {
