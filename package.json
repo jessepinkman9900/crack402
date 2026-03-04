@@ -1,0 +1,5 @@
+{
+  "name": "crack402",
+  "private": true,
+  "workspaces": ["control-plane"]
+}

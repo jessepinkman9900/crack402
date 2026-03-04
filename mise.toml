@@ -1,5 +1,54 @@
 [tools]
 ansible = "13.4.0"
 "aqua:dotenvx/dotenvx" = "1.48.4"
+bun = "1.3.7"
 prek = "0.3.2"
 terraform = "1.14.5"
+
+[tasks.deploy-cluster]
+depends = ["provision-nodes", "run-ansible"]
+
+[tasks.provision-nodes]
+run = '''
+#!/bin/bash
+
+echo "Provisioning development cluster with Terraform..."
+cd infra/cluster/terraform/environments/dev
+terraform init
+dotenv -f .env terraform apply -auto-approve -target=latitudesh_project.project
+dotenv -f .env terraform apply -auto-approve
+'''
+
+[tasks.run-ansible]
+run = '''
+#!/bin/bash
+echo "Running Ansible playbooks on provisioned nodes..."
+echo "TODO"
+'''
+
+[tasks.destroy-cluster]
+run = '''
+#!/bin/bash
+
+echo "Destroying development cluster with Terraform..."
+cd infra/cluster/terraform/environments/dev
+dotenv -f .env terraform destroy -auto-approve
+'''
+
+[tasks.dev-cp]
+run = '''
+#!/bin/bash
+
+echo "Running control plane on development cluster..."
+cd control-plane
+bun install
+bun run dev
+'''
+
+[tasks.deploy-cp]
+run = '''
+#!/bin/bash
+
+echo "Deploying control plane to development cluster..."
+echo "TODO"
+'''

@@ -1,0 +1,16 @@
+name = "control-plane"
+main = "src/index.ts"
+compatibility_date = "2026-03-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[durable_objects]
+bindings = [
+  { class_name = "MyDurableObject", name = "MY_DURABLE_OBJECT" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MyDurableObject"]
