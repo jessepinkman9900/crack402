@@ -67,3 +67,19 @@ resource "latitudesh_vlan_assignment" "vlan_assignment" {
 
 # todo: firewall assignments
 
+# node cloud-init
+resource "latitudesh_user_data" "setup" {
+  description = "Standard bootsrap (packages + files + commands)"
+  content = base64encode(<<-YAML
+    #cloud-config
+    package_update: true
+    package_upgrade: false # adds too much time to the provisioning process if enabled
+    manage_etc_hosts: true
+    ssh_pwauth: false
+    timezone: UTC
+    ntp:
+      enabled: true
+
+  YAML
+  )
+}

@@ -25,7 +25,6 @@ variable "provisioning_type" {
 
 }
 
-
 variable "region" {
   type        = string
   default     = "CHI"

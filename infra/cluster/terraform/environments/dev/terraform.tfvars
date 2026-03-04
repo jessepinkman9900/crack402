@@ -2,7 +2,7 @@
 project_name      = "crack402"
 environment       = "Development"
 provisioning_type = "on_demand"
-region            = "CHI"
+region            = "LAX"
 cluster_config = {
   node_instance = "c2-small-x86"
   billing       = "hourly"
