@@ -4,6 +4,8 @@ ansible = "13.4.0"
 bun = "1.3.7"
 prek = "0.3.2"
 terraform = "1.14.5"
+"cargo:cargo-sort" = "2.0.2"
+"cargo:samply" = "0.13.1"
 
 [tasks.deploy-cluster]
 depends = ["provision-nodes", "run-ansible"]

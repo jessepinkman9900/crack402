@@ -1,0 +1,18 @@
+[workspace]
+members = ["bin/node-agent"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88.0"
+
+[workspace.dependencies]
+anyhow = "1.0.101"
+criterion = { version = "0.8.2", features = ["html_reports"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+time = { version = "0.3.7", features = ["serde"] }
+tokio = { version = "1.49.0", features = ["full", "tracing"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+uuid = { version = "1.20.0", features = ["v4"] }
