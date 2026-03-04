@@ -1,10 +1,6 @@
 - name: worker node setup
   hosts: worker_nodes
   become: false
-  tasks:
-    - name: ping worker nodes
-      ansible.builtin.ping:
-      tags: [always]
   roles:
     - role: cloudflared
       tags: [cloudflared]
