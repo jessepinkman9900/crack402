@@ -1,0 +1,19 @@
+# --- Version pins ---
+# To upgrade: change the version here and re-run the playbook.
+# Roles use these vars; nothing else should hardcode versions.
+
+firecracker_version: "v1.14.2"
+# kernel and rootfs are pulled from Firecracker's CI S3 bucket.
+# Set firecracker_ci_version to the semver prefix (no patch).
+# Example: firecracker_version=v1.11.0 → firecracker_ci_version=v1.11
+firecracker_ci_version: "v1.14"
+
+# Local paths to compiled binaries (relative to the playbook directory).
+# Build them first: `cargo build --release`
+crack402_node_agent_bin: "{{ playbook_dir }}/../../../target/release/node-agent"
+crack402_vm_pool_manager_bin: "{{ playbook_dir }}/../../../target/release/vm-pool-manager"
+
+# Architecture map: Ansible → download slug
+arch_map:
+  x86_64: amd64
+  aarch64: arm64

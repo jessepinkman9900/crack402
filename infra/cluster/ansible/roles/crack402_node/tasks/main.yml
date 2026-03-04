@@ -1,0 +1,50 @@
+---
+# Deploys crack402 Rust binaries: node-agent and vm-pool-manager.
+#
+# Assumes binaries are already compiled on the control machine:
+#   cargo build --release
+#
+# Paths are set in group_vars/all.yml:
+#   crack402_node_agent_bin
+#   crack402_vm_pool_manager_bin
+
+- name: crack402_node | create install dir
+  ansible.builtin.file:
+    path: /usr/local/bin
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: crack402_node | deploy node-agent
+  ansible.builtin.copy:
+    src: "{{ crack402_node_agent_bin }}"
+    dest: /usr/local/bin/node-agent
+    mode: "0755"
+  become: true
+  notify: restart node-agent
+
+- name: crack402_node | deploy vm-pool-manager
+  ansible.builtin.copy:
+    src: "{{ crack402_vm_pool_manager_bin }}"
+    dest: /usr/local/bin/vm-pool-manager
+    mode: "0755"
+  become: true
+  notify: restart vm-pool-manager
+
+- name: crack402_node | verify node-agent
+  ansible.builtin.command: node-agent --version
+  register: na_ver
+  changed_when: false
+  failed_when: false
+
+- name: crack402_node | verify vm-pool-manager
+  ansible.builtin.command: vm-pool-manager --version
+  register: vpm_ver
+  changed_when: false
+  failed_when: false
+
+- name: crack402_node | print versions
+  ansible.builtin.debug:
+    msg:
+      - "node-agent: {{ na_ver.stdout | default('(no --version yet)') }}"
+      - "vm-pool-manager: {{ vpm_ver.stdout | default('(no --version yet)') }}"

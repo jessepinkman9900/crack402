@@ -1,0 +1,201 @@
+---
+# Installs Firecracker binary + CI kernel + rootfs.
+# Version is controlled by group_vars/all.yml → firecracker_version / firecracker_ci_version.
+# All assets (kernel, rootfs, SSH key) are placed in /home/ubuntu.
+
+- name: firecracker | set arch slug
+  ansible.builtin.set_fact:
+    fc_arch: "{{ arch_map[ansible_architecture] }}"
+    fc_arch_raw: "{{ ansible_architecture }}"
+
+# --- Check KVM access ---
+- name: kvm | install acl
+  ansible.builtin.apt:
+    name: acl
+    state: present
+  become: true
+
+- name: kvm | grant user rw access to /dev/kvm
+  ansible.builtin.command: setfacl -m u:{{ ansible_user }}:rw /dev/kvm
+  become: true
+  changed_when: false
+
+- name: kvm | verify /dev/kvm access
+  ansible.builtin.command: bash -c '[ -r /dev/kvm ] && [ -w /dev/kvm ] && echo "OK" || echo "FAIL"'
+  register: kvm_access
+  changed_when: false
+  failed_when: kvm_access.stdout != "OK"
+
+- name: kvm | print access result
+  ansible.builtin.debug:
+    msg: "{{ kvm_access.stdout }}"
+
+# --- Binary ---
+
+- name: firecracker | download release tarball
+  ansible.builtin.get_url:
+    url: "https://github.com/firecracker-microvm/firecracker/releases/download/{{ firecracker_version }}/firecracker-{{ firecracker_version }}-{{ fc_arch_raw }}.tgz"
+    dest: "/tmp/firecracker-{{ firecracker_version }}.tgz"
+    mode: "0644"
+
+- name: firecracker | extract tarball
+  ansible.builtin.unarchive:
+    src: "/tmp/firecracker-{{ firecracker_version }}.tgz"
+    dest: /tmp
+    remote_src: true
+
+- name: firecracker | install binary to /usr/local/bin
+  ansible.builtin.copy:
+    src: "/tmp/release-{{ firecracker_version }}-{{ fc_arch_raw }}/firecracker-{{ firecracker_version }}-{{ fc_arch_raw }}"
+    dest: /usr/local/bin/firecracker
+    mode: "0755"
+    remote_src: true
+  become: true
+
+- name: firecracker | install jailer to /usr/local/bin
+  ansible.builtin.copy:
+    src: "/tmp/release-{{ firecracker_version }}-{{ fc_arch_raw }}/jailer-{{ firecracker_version }}-{{ fc_arch_raw }}"
+    dest: /usr/local/bin/jailer
+    mode: "0755"
+    remote_src: true
+  become: true
+
+# --- Kernel + Rootfs (from Firecracker CI S3) ---
+
+- name: firecracker | fetch latest kernel key from S3
+  ansible.builtin.uri:
+    url: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{{ firecracker_ci_version }}/{{ fc_arch_raw }}/vmlinux-&list-type=2"
+    return_content: true
+  register: kernel_listing
+
+- name: firecracker | parse kernel key
+  ansible.builtin.set_fact:
+    fc_kernel_key: >-
+      {{
+        kernel_listing.content
+        | regex_findall('(?<=<Key>)(firecracker-ci/' + firecracker_ci_version + '/' + fc_arch_raw + '/vmlinux-[0-9]+\.[0-9]+\.[0-9]+)(?=</Key>)')
+        | sort
+        | last
+      }}
+
+- name: firecracker | download kernel
+  ansible.builtin.get_url:
+    url: "https://s3.amazonaws.com/spec.ccfc.min/{{ fc_kernel_key }}"
+    dest: "/home/ubuntu/{{ fc_kernel_key | basename }}"
+    mode: "0644"
+
+- name: firecracker | fetch latest rootfs key from S3
+  ansible.builtin.uri:
+    url: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{{ firecracker_ci_version }}/{{ fc_arch_raw }}/ubuntu-&list-type=2"
+    return_content: true
+  register: rootfs_listing
+
+- name: firecracker | parse rootfs key
+  ansible.builtin.set_fact:
+    fc_rootfs_key: >-
+      {{
+        rootfs_listing.content
+        | regex_findall('(?<=<Key>)(firecracker-ci/' + firecracker_ci_version + '/' + fc_arch_raw + '/ubuntu-[0-9]+\.[0-9]+\.squashfs)(?=</Key>)')
+        | sort
+        | last
+      }}
+
+- name: firecracker | set rootfs version fact
+  ansible.builtin.set_fact:
+    fc_ubuntu_version: "{{ fc_rootfs_key | basename | regex_replace('\\.squashfs$', '') | regex_search('[0-9]+\\.[0-9]+') }}"
+
+- name: firecracker | install required packages for rootfs conversion
+  ansible.builtin.apt:
+    name:
+      - squashfs-tools
+      - e2fsprogs
+    state: present
+    update_cache: true
+  become: true
+
+- name: firecracker | download rootfs squashfs
+  ansible.builtin.get_url:
+    url: "https://s3.amazonaws.com/spec.ccfc.min/{{ fc_rootfs_key }}"
+    dest: "/home/ubuntu/ubuntu-{{ fc_ubuntu_version }}.squashfs.upstream"
+    mode: "0644"
+
+- name: firecracker | unsquash rootfs
+  ansible.builtin.command:
+    cmd: "unsquashfs -d /home/ubuntu/squashfs-root /home/ubuntu/ubuntu-{{ fc_ubuntu_version }}.squashfs.upstream"
+    creates: /home/ubuntu/squashfs-root
+
+- name: firecracker | generate SSH keypair for VM access
+  ansible.builtin.command:
+    cmd: "ssh-keygen -f /home/ubuntu/id_rsa -N ''"
+    creates: "/home/ubuntu/ubuntu-{{ fc_ubuntu_version }}.id_rsa"
+
+- name: firecracker | ensure /root/.ssh exists in rootfs
+  ansible.builtin.file:
+    path: /home/ubuntu/squashfs-root/root/.ssh
+    state: directory
+    mode: "0700"
+    owner: root
+    group: root
+  become: true
+
+- name: firecracker | inject SSH public key into rootfs
+  ansible.builtin.copy:
+    src: /home/ubuntu/id_rsa.pub
+    dest: /home/ubuntu/squashfs-root/root/.ssh/authorized_keys
+    mode: "0600"
+    owner: root
+    group: root
+    remote_src: true
+  become: true
+
+- name: firecracker | fix rootfs ownership
+  ansible.builtin.file:
+    path: /home/ubuntu/squashfs-root
+    owner: root
+    group: root
+    recurse: true
+  become: true
+
+- name: firecracker | create ext4 image (1G)
+  ansible.builtin.command:
+    cmd: "truncate -s 1G /home/ubuntu/ubuntu-{{ fc_ubuntu_version }}.ext4"
+    creates: "/home/ubuntu/ubuntu-{{ fc_ubuntu_version }}.ext4"
+
+- name: firecracker | format ext4 image
+  ansible.builtin.command:
+    cmd: "mkfs.ext4 -d /home/ubuntu/squashfs-root -F -O ^64bit,^metadata_csum /home/ubuntu/ubuntu-{{ fc_ubuntu_version }}.ext4"
+  become: true
+
+- name: firecracker | rename SSH key to versioned name
+  ansible.builtin.command:
+    cmd: "mv /home/ubuntu/id_rsa /home/ubuntu/ubuntu-{{ fc_ubuntu_version }}.id_rsa"
+    creates: "/home/ubuntu/ubuntu-{{ fc_ubuntu_version }}.id_rsa"
+
+- name: firecracker | verify assets
+  ansible.builtin.shell: |
+    errors=0
+    KERNEL=$(ls /home/ubuntu/vmlinux-* 2>/dev/null | tail -1)
+    if [ -f "$KERNEL" ]; then echo "Kernel: $KERNEL"; else echo "ERROR: Kernel does not exist"; errors=1; fi
+    ROOTFS=$(ls /home/ubuntu/*.ext4 2>/dev/null | tail -1)
+    if e2fsck -fn "$ROOTFS" >/dev/null 2>&1; then echo "Rootfs: $ROOTFS"; else echo "ERROR: $ROOTFS is not a valid ext4 fs"; errors=1; fi
+    KEY=$(ls /home/ubuntu/*.id_rsa 2>/dev/null | tail -1)
+    if [ -f "$KEY" ]; then echo "SSH Key: $KEY"; else echo "ERROR: Key does not exist"; errors=1; fi
+    exit $errors
+  register: asset_check
+  changed_when: false
+  failed_when: asset_check.rc != 0
+
+- name: firecracker | print asset check
+  ansible.builtin.debug:
+    msg: "{{ asset_check.stdout_lines }}"
+
+- name: firecracker | verify binary
+  ansible.builtin.command: firecracker --version
+  register: fc_ver
+  changed_when: false
+
+- name: firecracker | print version
+  ansible.builtin.debug:
+    msg: "{{ fc_ver.stdout }}"
+
+# todo: start firecracker

@@ -1,0 +1,35 @@
+---
+# Installs cloudflared via Cloudflare's official APT repository.
+# Version is controlled by group_vars/all.yml → cloudflared_version.
+
+- name: cloudflared | add Cloudflare GPG key
+  ansible.builtin.get_url:
+    url: https://pkg.cloudflare.com/cloudflare-main.gpg
+    dest: /usr/share/keyrings/cloudflare-main.gpg
+    mode: "0644"
+  become: true
+
+- name: cloudflared | add APT repository
+  ansible.builtin.copy:
+    content: "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared noble main\n"
+    dest: /etc/apt/sources.list.d/cloudflared.list
+    mode: "0644"
+  become: true
+
+- name: cloudflared | install
+  ansible.builtin.apt:
+    name: cloudflared
+    state: present
+    update_cache: true
+  become: true
+
+- name: cloudflared | verify
+  ansible.builtin.command: cloudflared --version
+  register: cloudflared_ver
+  changed_when: false
+
+- name: cloudflared | print version
+  ansible.builtin.debug:
+    msg: "{{ cloudflared_ver.stdout }}"
+
+# todo: config cloudflared

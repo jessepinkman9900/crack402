@@ -46,6 +46,7 @@ resource "latitudesh_server" "nodes" {
   project          = latitudesh_project.project.id
   site             = data.latitudesh_region.region.slug
   ssh_keys         = [latitudesh_ssh_key.ssh_key.id]
+  user_data        = latitudesh_user_data.setup.id
 }
 
 output "nodes" {
@@ -69,16 +70,12 @@ resource "latitudesh_vlan_assignment" "vlan_assignment" {
 
 # node cloud-init
 resource "latitudesh_user_data" "setup" {
-  description = "Standard bootsrap (packages + files + commands)"
+  description = "Standard bootstrap (packages + files + commands)"
   content = base64encode(<<-YAML
     #cloud-config
-    package_update: true
-    package_upgrade: false # adds too much time to the provisioning process if enabled
     manage_etc_hosts: true
     ssh_pwauth: false
     timezone: UTC
-    ntp:
-      enabled: true
 
   YAML
   )
