@@ -6,6 +6,7 @@ prek = "0.3.2"
 terraform = "1.14.5"
 "cargo:cargo-sort" = "2.0.2"
 "cargo:samply" = "0.13.1"
+"cargo:cross" = "0.2.5"
 
 [tasks.deploy-cluster]
 depends = ["provision-nodes", "run-ansible"]
@@ -54,3 +55,19 @@ run = '''
 echo "Deploying control plane to development cluster..."
 echo "TODO"
 '''
+
+[tasks.build-x86_64-linux]
+description = "Build node-agent for Linux x86_64 (static musl - Ubuntu, Debian, RHEL, CentOS)"
+run = "cross build --release --target x86_64-unknown-linux-musl -p node-agent"
+
+[tasks.build-aarch64-linux]
+description = "Build node-agent for Linux ARM64 (static musl - Graviton, ARM servers)"
+run = "cross build --release --target aarch64-unknown-linux-musl -p node-agent"
+
+[tasks.build-windows]
+description = "Build node-agent for Windows x86_64"
+run = "cross build --release --target x86_64-pc-windows-gnu -p node-agent"
+
+[tasks.build-all]
+description = "Build node-agent for all release targets"
+depends = ["build-x86_64-linux", "build-aarch64-linux", "build-windows"]

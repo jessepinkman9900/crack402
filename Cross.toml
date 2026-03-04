@@ -1,0 +1,22 @@
+# cross-rs cross-compilation configuration
+# https://github.com/cross-rs/cross
+#
+# Targets:
+#   x86_64-unknown-linux-musl  - static binary, all x86_64 Linux (Ubuntu, Debian, RHEL, CentOS, Alpine)
+#   aarch64-unknown-linux-musl - static binary, all ARM64 Linux (Graviton, ARM servers)
+#   x86_64-pc-windows-gnu      - Windows x86_64
+#
+# Usage:
+#   cross build --release --target x86_64-unknown-linux-musl
+#   cross build --release --target aarch64-unknown-linux-musl
+#   cross build --release --target x86_64-pc-windows-gnu
+
+# todo: fix
+[build]
+default-target = "x86_64-unknown-linux-musl"
+
+[target.x86_64-unknown-linux-musl]
+
+[target.aarch64-unknown-linux-musl]
+
+[target.x86_64-pc-windows-gnu]
