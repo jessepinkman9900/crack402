@@ -1,0 +1,1212 @@
+openapi: 3.0.3
+info:
+  title: Universal Agent Sandbox API
+  description: |
+    A vendor-neutral REST API specification for provisioning, managing, and executing
+    code in isolated sandbox environments. Designed for autonomous AI agent use cases
+    with support for microVMs, containers, GPU workloads, file I/O, and x402 payments.
+
+    ## Design Principles
+    - LLM-friendly: Simple, predictable endpoints that AI agents can call via tool_use
+    - Isolation-agnostic: Works with Firecracker microVMs, gVisor, Kata, WASM, or containers
+    - Payment-native: HTTP 402 integration for autonomous agent compute purchasing
+    - Lifecycle-complete: Create, execute, pause, snapshot, resume, destroy
+    - Streaming-capable: SSE for real-time stdout/stderr during execution
+  version: 0.0.1
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: Agent Sandbox API Working Group
+
+servers:
+  - url: https://api.sandbox.example.com/v1
+    description: Production server
+
+tags:
+  - name: Sandboxes
+    description: Sandbox lifecycle management
+  - name: Execution
+    description: Code and command execution within sandboxes
+  - name: Files
+    description: File operations within sandboxes
+  - name: Snapshots
+    description: Sandbox state snapshots and restore
+
+paths:
+  /sandboxes:
+    post:
+      operationId: createSandbox
+      tags: [Sandboxes]
+      summary: Create a new sandbox
+      description: |
+        Provisions an isolated execution environment. Returns immediately with a
+        sandbox_id. The sandbox transitions through states: provisioning → ready →
+        running. Use GET /sandboxes/{id} or the wait endpoint to poll for readiness.
+
+        If no payment method is provided and the server requires payment, responds
+        with HTTP 402 including payment terms per the x402 protocol.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSandboxRequest'
+            examples:
+              minimal:
+                summary: Minimal sandbox (defaults)
+                value:
+                  base_image: "python:3.12-slim"
+              full:
+                summary: Fully specified sandbox
+                value:
+                  base_image: "ubuntu:22.04"
+                  vcpu: 4
+                  memory_mb: 8192
+                  timeout_seconds: 3600
+                  gpu: "A100"
+                  env_vars:
+                    OPENAI_API_KEY: "sk-..."
+                    ENV: "sandbox"
+                  network_policy: "outbound-only"
+                  metadata:
+                    agent_id: "agent-abc123"
+                    purpose: "data-analysis"
+              from_github:
+                summary: Sandbox from GitHub repo
+                value:
+                  base_image: "node:20"
+                  github_repo:
+                    url: "https://github.com/org/repo"
+                    branch: "main"
+                    commit: "a1b2c3d"
+                  vcpu: 2
+                  memory_mb: 4096
+                  timeout_seconds: 1800
+      responses:
+        '201':
+          description: Sandbox created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sandbox'
+          headers:
+            Location:
+              schema:
+                type: string
+              description: URL of the created sandbox resource
+        '402':
+          description: Payment required (x402 protocol)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRequired'
+          headers:
+            X-Payment-Amount:
+              schema:
+                type: string
+              description: "Required payment amount (e.g., '0.01')"
+            X-Payment-Asset:
+              schema:
+                type: string
+              description: "Payment asset (e.g., 'USDC')"
+            X-Payment-Network:
+              schema:
+                type: string
+              description: "Payment network (e.g., 'base', 'solana')"
+            X-Payment-Recipient:
+              schema:
+                type: string
+              description: "Recipient wallet address"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/CapacityExhausted'
+
+    get:
+      operationId: listSandboxes
+      tags: [Sandboxes]
+      summary: List all active sandboxes
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/SandboxStatus'
+        - name: metadata
+          in: query
+          description: "Filter by metadata key=value (e.g., agent_id=abc123)"
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of sandboxes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sandboxes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Sandbox'
+                  next_cursor:
+                    type: string
+                    nullable: true
+                  total_count:
+                    type: integer
+
+  /sandboxes/{sandbox_id}:
+    get:
+      operationId: getSandbox
+      tags: [Sandboxes]
+      summary: Get sandbox status and details
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+      responses:
+        '200':
+          description: Sandbox details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sandbox'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      operationId: destroySandbox
+      tags: [Sandboxes]
+      summary: Destroy a sandbox
+      description: |
+        Permanently destroys the sandbox and all associated resources.
+        This is irreversible. Use POST /sandboxes/{id}/stop for graceful shutdown,
+        or POST /sandboxes/{id}/snapshot to preserve state before destroying.
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+        - name: force
+          in: query
+          description: Force-kill without graceful shutdown
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '204':
+          description: Sandbox destroyed
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Sandbox is in a state that cannot be destroyed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /sandboxes/{sandbox_id}/wait:
+    get:
+      operationId: waitForSandbox
+      tags: [Sandboxes]
+      summary: Block until sandbox reaches desired state
+      description: |
+        Long-polls until the sandbox transitions to the requested state or timeout
+        is reached. Inspired by Fly.io's wait endpoint pattern.
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+        - name: state
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/SandboxStatus'
+        - name: timeout_seconds
+          in: query
+          schema:
+            type: integer
+            default: 60
+            maximum: 300
+      responses:
+        '200':
+          description: Sandbox reached desired state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sandbox'
+        '408':
+          description: Timeout waiting for state transition
+
+  /sandboxes/{sandbox_id}/start:
+    post:
+      operationId: startSandbox
+      tags: [Sandboxes]
+      summary: Start a stopped or paused sandbox
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+      responses:
+        '200':
+          description: Sandbox started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sandbox'
+        '409':
+          description: Sandbox cannot be started from current state
+
+  /sandboxes/{sandbox_id}/stop:
+    post:
+      operationId: stopSandbox
+      tags: [Sandboxes]
+      summary: Gracefully stop a running sandbox
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                signal:
+                  type: string
+                  enum: [SIGTERM, SIGKILL]
+                  default: SIGTERM
+                grace_period_seconds:
+                  type: integer
+                  default: 10
+      responses:
+        '200':
+          description: Sandbox stopping
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sandbox'
+
+  /sandboxes/{sandbox_id}/pause:
+    post:
+      operationId: pauseSandbox
+      tags: [Sandboxes]
+      summary: Pause a running sandbox (freeze in memory)
+      description: |
+        Suspends the sandbox process in memory. Lower cost than running but faster
+        resume than a full stop. Not all isolation backends support this.
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+      responses:
+        '200':
+          description: Sandbox paused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sandbox'
+        '409':
+          description: Sandbox cannot be paused (not supported or wrong state)
+
+  /sandboxes/{sandbox_id}/exec:
+    post:
+      operationId: executeInSandbox
+      tags: [Execution]
+      summary: Execute code or a command in the sandbox
+      description: |
+        Runs code or shell commands inside the sandbox. Supports inline code strings,
+        shell commands, or executing a file already present in the sandbox.
+
+        For long-running executions, use Accept: text/event-stream to receive
+        stdout/stderr in real-time via Server-Sent Events.
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+        - name: Accept
+          in: header
+          schema:
+            type: string
+            enum: [application/json, text/event-stream]
+            default: application/json
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecRequest'
+            examples:
+              inline_python:
+                summary: Execute inline Python code
+                value:
+                  type: code
+                  language: python
+                  code: |
+                    import pandas as pd
+                    df = pd.DataFrame({'a': [1,2,3], 'b': [4,5,6]})
+                    print(df.describe())
+                  timeout_seconds: 30
+              shell_command:
+                summary: Execute a shell command
+                value:
+                  type: command
+                  command: ["pip", "install", "requests", "&&", "python", "main.py"]
+                  working_dir: /workspace
+                  timeout_seconds: 120
+              run_file:
+                summary: Execute an existing file
+                value:
+                  type: file
+                  file_path: /workspace/analysis.py
+                  args: ["--input", "data.csv"]
+                  timeout_seconds: 60
+      responses:
+        '200':
+          description: Execution completed (synchronous)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecResult'
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  SSE stream with events:
+                  - event: stdout, data: {text}
+                  - event: stderr, data: {text}
+                  - event: exit, data: {exit_code, duration_ms}
+                  - event: artifact, data: {path, size_bytes, mime_type}
+        '202':
+          description: Execution started (async, use exec_id to poll)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exec_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [running]
+                  poll_url:
+                    type: string
+                  stream_url:
+                    type: string
+        '408':
+          description: Execution timed out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecResult'
+        '409':
+          description: Sandbox is not in a running state
+
+  /sandboxes/{sandbox_id}/exec/{exec_id}:
+    get:
+      operationId: getExecResult
+      tags: [Execution]
+      summary: Get the result of an async execution
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+        - name: exec_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Execution result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecResult'
+
+  /sandboxes/{sandbox_id}/files:
+    post:
+      operationId: writeFile
+      tags: [Files]
+      summary: Write a file to the sandbox filesystem
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path, content]
+              properties:
+                path:
+                  type: string
+                  description: Absolute path in the sandbox filesystem
+                  example: /workspace/main.py
+                content:
+                  type: string
+                  description: File content (UTF-8 text or base64-encoded binary)
+                encoding:
+                  type: string
+                  enum: [utf-8, base64]
+                  default: utf-8
+                permissions:
+                  type: string
+                  example: "0755"
+      responses:
+        '201':
+          description: File written
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path:
+                    type: string
+                  size_bytes:
+                    type: integer
+
+  /sandboxes/{sandbox_id}/files/{path}:
+    get:
+      operationId: readFile
+      tags: [Files]
+      summary: Read a file from the sandbox filesystem
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+          description: URL-encoded file path
+      responses:
+        '200':
+          description: File contents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path:
+                    type: string
+                  content:
+                    type: string
+                  encoding:
+                    type: string
+                    enum: [utf-8, base64]
+                  size_bytes:
+                    type: integer
+                  mime_type:
+                    type: string
+        '404':
+          description: File not found
+
+    delete:
+      operationId: deleteFile
+      tags: [Files]
+      summary: Delete a file from the sandbox filesystem
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+        - name: path
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: File deleted
+
+  /sandboxes/{sandbox_id}/files/list:
+    get:
+      operationId: listFiles
+      tags: [Files]
+      summary: List files in a sandbox directory
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+        - name: directory
+          in: query
+          schema:
+            type: string
+            default: /workspace
+        - name: recursive
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: File listing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  directory:
+                    type: string
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                        type:
+                          type: string
+                          enum: [file, directory, symlink]
+                        size_bytes:
+                          type: integer
+                        modified_at:
+                          type: string
+                          format: date-time
+
+  /sandboxes/{sandbox_id}/snapshots:
+    post:
+      operationId: createSnapshot
+      tags: [Snapshots]
+      summary: Snapshot the current sandbox state
+      description: |
+        Captures the complete state of the sandbox (filesystem, memory, running
+        processes) as a restorable snapshot. Can be used to fork sandboxes or
+        resume later from a known state.
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Human-readable snapshot name
+                metadata:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        '201':
+          description: Snapshot created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Snapshot'
+
+  /sandboxes/from-snapshot:
+    post:
+      operationId: createSandboxFromSnapshot
+      tags: [Snapshots]
+      summary: Create a new sandbox from a snapshot
+      description: |
+        Forks a new sandbox from an existing snapshot. The new sandbox starts in
+        the exact state captured by the snapshot. Useful for branching agent
+        workflows or resuming from checkpoints.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [snapshot_id]
+              properties:
+                snapshot_id:
+                  type: string
+                override_env_vars:
+                  type: object
+                  additionalProperties:
+                    type: string
+                override_timeout_seconds:
+                  type: integer
+                metadata:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        '201':
+          description: Sandbox created from snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sandbox'
+
+  /sandboxes/{sandbox_id}/ports:
+    get:
+      operationId: listExposedPorts
+      tags: [Sandboxes]
+      summary: List exposed network ports and their public URLs
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+      responses:
+        '200':
+          description: Exposed ports
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ports:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        port:
+                          type: integer
+                        protocol:
+                          type: string
+                          enum: [http, tcp, websocket]
+                        public_url:
+                          type: string
+                          format: uri
+
+  /webhooks:
+    post:
+      operationId: registerWebhook
+      tags: [Sandboxes]
+      summary: Register a webhook for sandbox lifecycle events
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                events:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                      - sandbox.created
+                      - sandbox.ready
+                      - sandbox.started
+                      - sandbox.stopped
+                      - sandbox.paused
+                      - sandbox.destroyed
+                      - sandbox.error
+                      - sandbox.timeout
+                      - exec.started
+                      - exec.completed
+                      - exec.failed
+                secret:
+                  type: string
+                  description: HMAC secret for webhook signature verification
+      responses:
+        '201':
+          description: Webhook registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhook_id:
+                    type: string
+                  url:
+                    type: string
+                  events:
+                    type: array
+                    items:
+                      type: string
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: API key passed as Bearer token
+    ApiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    X402Payment:
+      type: apiKey
+      in: header
+      name: X-Payment-Signature
+      description: |
+        x402 payment proof. When a 402 response is received, the agent pays
+        the specified amount in the specified asset on the specified network,
+        then retries the request with this header containing the payment
+        signature/proof.
+
+  parameters:
+    SandboxId:
+      name: sandbox_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^sbx_[a-zA-Z0-9]{20,}$'
+      description: Unique sandbox identifier
+
+  schemas:
+    CreateSandboxRequest:
+      type: object
+      required: [base_image]
+      properties:
+        base_image:
+          type: string
+          description: |
+            OCI/Docker image reference or a provider-specific template ID.
+            Examples: "python:3.12-slim", "ubuntu:22.04", "template:data-science-v2"
+          example: "python:3.12-slim"
+        vcpu:
+          type: number
+          minimum: 0.25
+          maximum: 32
+          default: 2
+          description: Number of virtual CPUs (fractional allowed)
+        memory_mb:
+          type: integer
+          minimum: 256
+          maximum: 131072
+          default: 2048
+          description: Memory allocation in megabytes
+        gpu:
+          type: string
+          nullable: true
+          enum: [null, T4, L4, A10G, L40S, A100-40, A100-80, H100, H200, B200]
+          description: GPU type (null for CPU-only)
+        timeout_seconds:
+          type: integer
+          minimum: 10
+          maximum: 86400
+          default: 3600
+          description: |
+            Maximum sandbox lifetime in seconds. Sandbox is auto-destroyed after
+            this duration. Set to 86400 (24h) for long-running workloads.
+        idle_timeout_seconds:
+          type: integer
+          minimum: 0
+          maximum: 86400
+          default: 600
+          description: |
+            Auto-pause or auto-destroy after this many seconds of inactivity
+            (no exec calls). 0 disables idle timeout.
+        auto_destroy:
+          type: boolean
+          default: true
+          description: Automatically destroy sandbox when timeout or idle timeout is reached
+        auto_pause_on_idle:
+          type: boolean
+          default: false
+          description: Pause (instead of destroy) on idle timeout. Enables resume.
+        code:
+          type: string
+          nullable: true
+          description: |
+            Inline code to execute immediately after sandbox is ready.
+            If provided, the sandbox runs this code and the creation response
+            includes the execution result.
+        language:
+          type: string
+          nullable: true
+          enum: [python, javascript, typescript, ruby, go, rust, java, bash]
+          description: Language for inline code execution
+        github_repo:
+          type: object
+          nullable: true
+          description: Clone a GitHub repository into the sandbox on creation
+          properties:
+            url:
+              type: string
+              format: uri
+              description: HTTPS URL of the repository
+            branch:
+              type: string
+              default: main
+            commit:
+              type: string
+              description: Specific commit SHA to checkout
+            path:
+              type: string
+              default: /workspace
+              description: Path to clone into
+            token:
+              type: string
+              description: GitHub Personal Access Token for private repos
+        env_vars:
+          type: object
+          additionalProperties:
+            type: string
+          description: Environment variables injected into the sandbox
+          example:
+            API_KEY: "sk-abc123"
+            ENV: "sandbox"
+        network_policy:
+          type: string
+          enum: [none, outbound-only, full]
+          default: outbound-only
+          description: |
+            - none: No network access (air-gapped)
+            - outbound-only: Can make outbound requests, no inbound
+            - full: Full network access including inbound on exposed ports
+        exposed_ports:
+          type: array
+          items:
+            type: integer
+          description: Ports to expose publicly (requires network_policy=full)
+        volumes:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              mount_path:
+                type: string
+              size_gb:
+                type: number
+          description: Persistent volumes to attach
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            Arbitrary key-value metadata for filtering, tracking, and attribution.
+            Recommended keys: agent_id, purpose, session_id, user_id
+        payment:
+          type: object
+          nullable: true
+          description: x402 payment information for autonomous agent purchasing
+          properties:
+            method:
+              type: string
+              enum: [x402, api_key_billing, prepaid_credits]
+            # todo: standardise with x402 upto
+            x402_signature:
+              type: string
+              description: Pre-signed x402 payment proof
+            budget_limit_usd:
+              type: number
+              description: Maximum spend for this sandbox in USD
+
+    Sandbox:
+      type: object
+      properties:
+        sandbox_id:
+          type: string
+          example: "sbx_a1b2c3d4e5f6g7h8i9j0"
+        status:
+          $ref: '#/components/schemas/SandboxStatus'
+        base_image:
+          type: string
+        vcpu:
+          type: number
+        memory_mb:
+          type: integer
+        gpu:
+          type: string
+          nullable: true
+        timeout_seconds:
+          type: integer
+        idle_timeout_seconds:
+          type: integer
+        network_policy:
+          type: string
+        env_vars:
+          type: object
+          additionalProperties:
+            type: string
+          description: Injected env vars (values redacted in GET responses)
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          description: When the sandbox will auto-destroy based on timeout
+        public_url:
+          type: string
+          format: uri
+          nullable: true
+          description: Public URL for exposed ports (if network_policy=full)
+        private_ip:
+          type: string
+          nullable: true
+        region:
+          type: string
+          example: "us-east-1"
+        isolation_backend:
+          type: string
+          enum: [firecracker, gvisor, kata, wasm, container, v8-isolate]
+          description: Isolation technology used (informational)
+        cost_accrued_usd:
+          type: number
+          description: Total cost accrued so far for this sandbox
+        exec_result:
+          $ref: '#/components/schemas/ExecResult'
+          description: |
+            Present only if inline code was provided during creation.
+            Contains the result of the initial code execution.
+        events:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              status:
+                type: string
+              timestamp:
+                type: string
+                format: date-time
+
+    SandboxStatus:
+      type: string
+      enum:
+        - provisioning
+        - ready
+        - running
+        - paused
+        - stopping
+        - stopped
+        - error
+        - destroyed
+      description: |
+        State machine:
+        provisioning → ready → running ↔ paused
+                                  ↓          ↓
+                               stopping → stopped → destroyed
+        Any state can transition to error or destroyed.
+
+    ExecRequest:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [code, command, file]
+          description: |
+            - code: Execute inline code in a specified language
+            - command: Execute a shell command
+            - file: Execute a file already in the sandbox
+        code:
+          type: string
+          description: Inline code string (required when type=code)
+        language:
+          type: string
+          enum: [python, javascript, typescript, ruby, go, rust, java, bash]
+          description: Language for inline code (required when type=code)
+        command:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          description: |
+            Shell command to execute (required when type=command).
+            String is executed via /bin/sh -c. Array is exec'd directly.
+        file_path:
+          type: string
+          description: Path to file to execute (required when type=file)
+        args:
+          type: array
+          items:
+            type: string
+          description: Arguments to pass to the file (when type=file)
+        working_dir:
+          type: string
+          default: /workspace
+        env_vars:
+          type: object
+          additionalProperties:
+            type: string
+          description: Additional env vars for this execution only
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 86400
+          default: 300
+          description: Max execution time for this command
+        stdin:
+          type: string
+          description: String to pipe to stdin of the process
+        async:
+          type: boolean
+          default: false
+          description: |
+            If true, returns immediately with exec_id for polling.
+            If false (default), blocks until execution completes.
+
+    ExecResult:
+      type: object
+      properties:
+        exec_id:
+          type: string
+          example: "exec_x1y2z3"
+        status:
+          type: string
+          enum: [running, completed, failed, timed_out, cancelled]
+        exit_code:
+          type: integer
+          nullable: true
+          description: Process exit code. 0 = success. null if still running.
+        stdout:
+          type: string
+          description: Standard output (truncated to 1MB; use files for larger output)
+        stderr:
+          type: string
+          description: Standard error output
+        duration_ms:
+          type: integer
+          description: Execution wall-clock time in milliseconds
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        artifacts:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+                description: Path in sandbox filesystem
+              size_bytes:
+                type: integer
+              mime_type:
+                type: string
+              download_url:
+                type: string
+                format: uri
+                description: Temporary signed URL for downloading
+          description: |
+            Files generated during execution that were written to the
+            /workspace/output/ directory (auto-detected artifacts).
+
+    Snapshot:
+      type: object
+      properties:
+        snapshot_id:
+          type: string
+        sandbox_id:
+          type: string
+          description: Source sandbox this snapshot was taken from
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        size_bytes:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    PaymentRequired:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "payment_required"
+        message:
+          type: string
+          example: "Payment is required to provision this sandbox."
+        payment_options:
+          type: array
+          items:
+            type: object
+            properties:
+              amount:
+                type: string
+                example: "0.05"
+              asset:
+                type: string
+                example: "USDC"
+              network:
+                type: string
+                example: "base"
+              recipient:
+                type: string
+                example: "0x1234...abcd"
+              description:
+                type: string
+                example: "2 vCPU, 4GB RAM, 1 hour sandbox"
+        x402_spec_url:
+          type: string
+          format: uri
+          example: "https://www.x402.org/spec"
+
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          description: Machine-readable error code
+          enum:
+            - invalid_request
+            - unauthorized
+            - forbidden
+            - sandbox_not_found
+            - sandbox_state_conflict
+            - exec_timeout
+            - resource_limit_exceeded
+            - capacity_exhausted
+            - payment_required
+            - rate_limited
+            - internal_error
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          description: Additional context about the error
+        request_id:
+          type: string
+          description: Unique request ID for debugging
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Sandbox not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Too many requests
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying
+    CapacityExhausted:
+      description: No available capacity for requested resources
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+security:
+  - BearerAuth: []
+  - ApiKeyHeader: []

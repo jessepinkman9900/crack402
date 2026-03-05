@@ -1,0 +1,1 @@
+ALTER TABLE `bots` ADD `version` text DEFAULT '1.0.0' NOT NULL;

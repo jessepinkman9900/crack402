@@ -1,0 +1,630 @@
+import type {
+  CloudProviderAdapter,
+  CloudServer,
+  ServerCreationOptions,
+  RegionPricing,
+  ServerTypeInfo
+} from "./types";
+import type { AWSBindings } from "../../types";
+
+/**
+ * AWS Cloud adapter using direct EC2 API calls.
+ * Compatible with Cloudflare Workers runtime.
+ */
+export function createAWSAdapter(env: AWSBindings): CloudProviderAdapter {
+  const region = env.AWS_REGION;
+  const credentials = {
+    accessKeyId: env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: env.AWS_SECRET_ACCESS_KEY
+  };
+
+  return {
+    getProviderName(): string {
+      return "aws";
+    },
+
+    async createServer(opts: ServerCreationOptions): Promise<CloudServer> {
+      try {
+        console.log(`[aws] Creating instance: ${opts.name} (${opts.serverType || 't4g.nano'}) in ${opts.region || region}`);
+
+        // Get or create security group
+        const securityGroupId = await getOrCreateSecurityGroup(region, credentials);
+
+        // Get the latest ARM64 AMI for the region
+        const amiId = await getLatestARM64AMI(opts.region || region, credentials);
+
+        // Prepare user data (cloud-init)
+        const userData = opts.cloudInit ? Buffer.from(opts.cloudInit).toString('base64') : undefined;
+
+        // Run EC2 instance
+        const instance = await runInstance({
+          region: opts.region || region,
+          credentials,
+          instanceType: opts.serverType || 't4g.nano',
+          amiId,
+          instanceName: opts.name,
+          userData,
+          securityGroupId
+        });
+
+        console.log(`[aws] Instance created successfully: ${instance.InstanceId}`);
+
+        return {
+          id: instance.InstanceId!,
+          name: opts.name,
+          status: mapAWSStatusToStandard(instance.State?.Name || 'pending'),
+          publicIp: instance.PublicIpAddress || null,
+          region: opts.region || region,
+          serverType: opts.serverType || 't4g.nano',
+          provider: 'aws'
+        };
+      } catch (error) {
+        console.error('[aws] Failed to create instance:', error);
+        throw new Error(`AWS createServer failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+
+    async deleteServer(serverId: string): Promise<void> {
+      try {
+        console.log(`[aws] Terminating instance: ${serverId}`);
+        await terminateInstance(region, credentials, serverId);
+        console.log(`[aws] Instance terminated successfully: ${serverId}`);
+      } catch (error) {
+        console.error('[aws] Failed to terminate instance:', error);
+        // Don't throw on 404-equivalent errors
+        if (error instanceof Error && error.message.includes('InvalidInstanceID.NotFound')) {
+          console.log(`[aws] Instance ${serverId} not found, assuming already deleted`);
+          return;
+        }
+        throw new Error(`AWS deleteServer failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+
+    async getServer(serverId: string): Promise<CloudServer | null> {
+      try {
+        const instance = await describeInstance(region, credentials, serverId);
+
+        if (!instance) {
+          return null;
+        }
+
+        return {
+          id: instance.InstanceId!,
+          name: instance.Tags?.find(tag => tag.Key === 'Name')?.Value || '',
+          status: mapAWSStatusToStandard(instance.State?.Name || 'pending'),
+          publicIp: instance.PublicIpAddress || null,
+          region: instance.Placement?.AvailabilityZone?.slice(0, -1) || region, // Remove AZ letter
+          serverType: instance.InstanceType || 't4g.nano',
+          provider: 'aws'
+        };
+      } catch (error) {
+        console.error('[aws] Failed to get instance:', error);
+        return null;
+      }
+    },
+
+    async getCheapestRegion(serverType: string): Promise<RegionPricing> {
+      // For t4g instances, us-east-1 is typically cheapest
+      // In a production system, you'd query AWS Pricing API
+      const FALLBACK: RegionPricing = { region: 'us-east-1', priceHourly: 0.0052 };
+
+      try {
+        // Map of common AWS regions with t4g.nano pricing (as of 2024)
+        const regionPricing: Record<string, number> = {
+          'us-east-1': 0.0052,
+          'us-east-2': 0.0052,
+          'us-west-2': 0.0052,
+          'eu-west-1': 0.0058,
+          'eu-central-1': 0.0061,
+          'ap-southeast-1': 0.0059,
+        };
+
+        // Find cheapest region
+        let cheapestRegion = 'us-east-1';
+        let cheapestPrice = regionPricing['us-east-1'];
+
+        for (const [reg, price] of Object.entries(regionPricing)) {
+          if (price < cheapestPrice) {
+            cheapestPrice = price;
+            cheapestRegion = reg;
+          }
+        }
+
+        console.log(`[aws] getCheapestRegion: "${serverType}" -> "${cheapestRegion}" ($${cheapestPrice}/hr)`);
+        return { region: cheapestRegion, priceHourly: cheapestPrice };
+      } catch (error) {
+        console.error('[aws] getCheapestRegion error, using fallback:', error);
+        return FALLBACK;
+      }
+    },
+
+    async listAvailableServerTypes(): Promise<ServerTypeInfo[]> {
+      // Common t4g instance types
+      return [
+        {
+          name: 't4g.nano',
+          vcpus: 2,
+          memory: 0.5,
+          storage: 0, // EBS-only
+          priceHourly: 0.0052,
+          availability: ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'eu-central-1', 'ap-southeast-1']
+        },
+        {
+          name: 't4g.micro',
+          vcpus: 2,
+          memory: 1,
+          storage: 0,
+          priceHourly: 0.0104,
+          availability: ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'eu-central-1', 'ap-southeast-1']
+        },
+        {
+          name: 't4g.small',
+          vcpus: 2,
+          memory: 2,
+          storage: 0,
+          priceHourly: 0.0208,
+          availability: ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'eu-central-1', 'ap-southeast-1']
+        },
+        {
+          name: 't4g.medium',
+          vcpus: 2,
+          memory: 4,
+          storage: 0,
+          priceHourly: 0.0416,
+          availability: ['us-east-1', 'us-east-2', 'us-west-2', 'eu-west-1', 'eu-central-1', 'ap-southeast-1']
+        }
+      ];
+    }
+  };
+}
+
+/**
+ * Maps AWS instance state to our standard status
+ */
+function mapAWSStatusToStandard(awsStatus: string): CloudServer['status'] {
+  switch (awsStatus) {
+    case 'pending':
+      return 'initializing';
+    case 'running':
+      return 'running';
+    case 'stopping':
+      return 'stopping';
+    case 'stopped':
+      return 'off';
+    case 'shutting-down':
+    case 'terminated':
+      return 'deleting';
+    default:
+      return 'off';
+  }
+}
+
+/**
+ * AWS SDK v3-style credentials
+ */
+interface AWSCredentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+/**
+ * Get or create a security group for Zeroclaw instances
+ */
+async function getOrCreateSecurityGroup(
+  region: string,
+  credentials: AWSCredentials
+): Promise<string> {
+  const groupName = 'zeroclaw-security-group';
+  const description = 'Security group for Zeroclaw bot instances';
+
+  try {
+    // Check if security group exists
+    const existingGroups = await ec2Request(region, credentials, 'DescribeSecurityGroups', {
+      Filters: [
+        { Name: 'group-name', Values: [groupName] }
+      ]
+    });
+
+    if (existingGroups.SecurityGroups && existingGroups.SecurityGroups.length > 0) {
+      const groupId = existingGroups.SecurityGroups[0].GroupId;
+      console.log(`[aws] Using existing security group: ${groupId}`);
+      return groupId;
+    }
+
+    // Create new security group
+    console.log(`[aws] Creating new security group: ${groupName}`);
+    const createResult = await ec2Request(region, credentials, 'CreateSecurityGroup', {
+      GroupName: groupName,
+      Description: description
+    });
+
+    const groupId = createResult.GroupId;
+
+    // Add ingress rule for SSH (port 22)
+    await ec2Request(region, credentials, 'AuthorizeSecurityGroupIngress', {
+      GroupId: groupId,
+      IpPermissions: [
+        {
+          IpProtocol: 'tcp',
+          FromPort: 22,
+          ToPort: 22,
+          IpRanges: [{ CidrIp: '0.0.0.0/0', Description: 'SSH access' }]
+        }
+      ]
+    });
+
+    console.log(`[aws] Security group created: ${groupId}`);
+    return groupId;
+  } catch (error) {
+    console.error('[aws] Failed to get/create security group:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get the latest Amazon Linux 2023 ARM64 AMI for a region
+ */
+async function getLatestARM64AMI(
+  region: string,
+  credentials: AWSCredentials
+): Promise<string> {
+  // Hardcoded AMI IDs for common regions (Amazon Linux 2023 ARM64)
+  // In production, you'd query the AMI API or use SSM Parameter Store
+  const amiMap: Record<string, string> = {
+    'us-east-1': 'ami-0c2644d544d0b35d3',
+    'us-east-2': 'ami-0ea0e613544e59a98',
+    'us-west-2': 'ami-0a9fc2d4cc2f2f9b9',
+    'eu-west-1': 'ami-0d71ea30463e0ff8d',
+    'eu-central-1': 'ami-0745b7d4092315796',
+    'ap-southeast-1': 'ami-0dc2d3e4c0f9ebd18',
+  };
+
+  const amiId = amiMap[region];
+  if (!amiId) {
+    console.warn(`[aws] No AMI found for region ${region}, using us-east-1 AMI`);
+    return amiMap['us-east-1'];
+  }
+
+  return amiId;
+}
+
+/**
+ * Run an EC2 instance
+ */
+async function runInstance(opts: {
+  region: string;
+  credentials: AWSCredentials;
+  instanceType: string;
+  amiId: string;
+  instanceName: string;
+  userData?: string;
+  securityGroupId: string;
+}): Promise<any> {
+  const params: any = {
+    ImageId: opts.amiId,
+    InstanceType: opts.instanceType,
+    MinCount: 1,
+    MaxCount: 1,
+    SecurityGroupIds: [opts.securityGroupId],
+    TagSpecifications: [
+      {
+        ResourceType: 'instance',
+        Tags: [
+          { Key: 'Name', Value: opts.instanceName },
+          { Key: 'Project', Value: 'Zeroclaw' },
+          { Key: 'ManagedBy', Value: 'zeroclaw-deploy' }
+        ]
+      }
+    ]
+  };
+
+  if (opts.userData) {
+    params.UserData = opts.userData;
+  }
+
+  const response = await ec2Request(opts.region, opts.credentials, 'RunInstances', params);
+
+  if (!response.Instances || response.Instances.length === 0) {
+    throw new Error('No instance returned from RunInstances');
+  }
+
+  return response.Instances[0];
+}
+
+/**
+ * Describe an EC2 instance
+ */
+async function describeInstance(
+  region: string,
+  credentials: AWSCredentials,
+  instanceId: string
+): Promise<any | null> {
+  try {
+    const response = await ec2Request(region, credentials, 'DescribeInstances', {
+      InstanceIds: [instanceId]
+    });
+
+    if (!response.Reservations || response.Reservations.length === 0) {
+      return null;
+    }
+
+    const instances = response.Reservations[0].Instances;
+    return instances && instances.length > 0 ? instances[0] : null;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('InvalidInstanceID.NotFound')) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Terminate an EC2 instance
+ */
+async function terminateInstance(
+  region: string,
+  credentials: AWSCredentials,
+  instanceId: string
+): Promise<void> {
+  await ec2Request(region, credentials, 'TerminateInstances', {
+    InstanceIds: [instanceId]
+  });
+}
+
+/**
+ * Make an EC2 API request using AWS Signature V4
+ * Simplified version for Cloudflare Workers compatibility
+ */
+async function ec2Request(
+  region: string,
+  credentials: AWSCredentials,
+  action: string,
+  params: any
+): Promise<any> {
+  const endpoint = `https://ec2.${region}.amazonaws.com/`;
+
+  // Build query string with sorted parameters (required for AWS Signature V4)
+  const allParams = {
+    Action: action,
+    Version: '2016-11-15',
+    ...flattenParams(params)
+  };
+
+  // Sort parameters alphabetically (AWS Signature V4 requirement)
+  const sortedParams = Object.keys(allParams)
+    .sort()
+    .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(allParams[key])}`)
+    .join('&');
+
+  const url = `${endpoint}?${sortedParams}`;
+
+  // Sign the request
+  const signedHeaders = await signAWSRequest({
+    method: 'GET',
+    url,
+    region,
+    service: 'ec2',
+    credentials
+  });
+
+  // Make the request
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      ...signedHeaders,
+      'User-Agent': 'Zeroclaw/1.0'
+    }
+  });
+
+  const text = await response.text();
+
+  if (!response.ok) {
+    console.error(`[aws] EC2 API error (${action}):`, text);
+    throw new Error(`EC2 API request failed (${action}): ${response.status} ${text.substring(0, 200)}`);
+  }
+
+  // Parse XML response (simplified)
+  return parseXMLResponse(text);
+}
+
+/**
+ * Flatten nested parameters for AWS API query strings
+ */
+function flattenParams(obj: any, prefix = ''): Record<string, string> {
+  const result: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(obj)) {
+    const fullKey = prefix ? `${prefix}.${key}` : key;
+
+    if (value === null || value === undefined) {
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => {
+        if (typeof item === 'object') {
+          Object.assign(result, flattenParams(item, `${fullKey}.${index + 1}`));
+        } else {
+          result[`${fullKey}.${index + 1}`] = String(item);
+        }
+      });
+    } else if (typeof value === 'object') {
+      Object.assign(result, flattenParams(value, fullKey));
+    } else {
+      result[fullKey] = String(value);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Sign an AWS request using Signature Version 4
+ * Simplified implementation for Cloudflare Workers
+ */
+async function signAWSRequest(opts: {
+  method: string;
+  url: string;
+  region: string;
+  service: string;
+  credentials: AWSCredentials;
+  body?: string;
+}): Promise<Record<string, string>> {
+  const { method, url, region, service, credentials, body = '' } = opts;
+
+  const urlObj = new URL(url);
+  const host = urlObj.host;
+  const date = new Date();
+  const dateStamp = date.toISOString().split('T')[0].replace(/-/g, '');
+  const amzDate = date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+
+  // Create canonical request
+  const canonicalUri = urlObj.pathname || '/';
+  const canonicalQueryString = urlObj.search.substring(1);
+  const canonicalHeaders = `host:${host}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = 'host;x-amz-date';
+  const payloadHash = await sha256Hex(body);
+
+  const canonicalRequest = [
+    method,
+    canonicalUri,
+    canonicalQueryString,
+    canonicalHeaders,
+    '',
+    signedHeaders,
+    payloadHash
+  ].join('\n');
+
+  // Create string to sign
+  const algorithm = 'AWS4-HMAC-SHA256';
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const canonicalRequestHash = await sha256Hex(canonicalRequest);
+  const stringToSign = [algorithm, amzDate, credentialScope, canonicalRequestHash].join('\n');
+
+  // Calculate signature
+  const signingKey = await getSignatureKey(credentials.secretAccessKey, dateStamp, region, service);
+  const signature = await hmacSha256Hex(signingKey, stringToSign);
+
+  // Build authorization header
+  const authorizationHeader = `${algorithm} Credential=${credentials.accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  return {
+    'Host': host,
+    'X-Amz-Date': amzDate,
+    'Authorization': authorizationHeader
+  };
+}
+
+/**
+ * Get signing key for AWS Signature V4
+ */
+async function getSignatureKey(key: string, dateStamp: string, region: string, service: string): Promise<ArrayBuffer> {
+  // AWS Signature V4 key derivation: HMAC-SHA256 chain
+  // Each step takes the previous result as ArrayBuffer and uses it as key for next HMAC
+  const kSecret = `AWS4${key}`;
+  const kDate = await hmacSha256(kSecret, dateStamp);
+  const kRegion = await hmacSha256(kDate, region);
+  const kService = await hmacSha256(kRegion, service);
+  const kSigning = await hmacSha256(kService, 'aws4_request');
+  return kSigning;
+}
+
+/**
+ * HMAC-SHA256
+ */
+async function hmacSha256(key: string | ArrayBuffer, data: string): Promise<ArrayBuffer> {
+  const encoder = new TextEncoder();
+  const keyData = typeof key === 'string' ? encoder.encode(key) : key;
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  return await crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(data));
+}
+
+/**
+ * HMAC-SHA256 as hex string
+ */
+async function hmacSha256Hex(key: ArrayBuffer, data: string): Promise<string> {
+  const signature = await hmacSha256(key, data);
+  return bufferToHex(signature);
+}
+
+/**
+ * SHA-256 hash as hex string
+ */
+async function sha256Hex(data: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const hash = await crypto.subtle.digest('SHA-256', encoder.encode(data));
+  return bufferToHex(hash);
+}
+
+/**
+ * Convert ArrayBuffer to hex string
+ */
+function bufferToHex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * Parse XML response from AWS API (simplified)
+ * This is a basic parser - consider using a proper XML library for production
+ */
+function parseXMLResponse(xml: string): any {
+  // Very basic XML parsing - just extract key values
+  // In production, use a proper XML parser
+  const result: any = {};
+
+  // Extract common response fields
+  const extractTag = (tag: string): string | null => {
+    const match = xml.match(new RegExp(`<${tag}>(.+?)</${tag}>`));
+    return match ? match[1] : null;
+  };
+
+  const extractAll = (tag: string): string[] => {
+    const regex = new RegExp(`<${tag}>(.+?)</${tag}>`, 'g');
+    const matches: string[] = [];
+    let match;
+    while ((match = regex.exec(xml)) !== null) {
+      matches.push(match[1]);
+    }
+    return matches;
+  };
+
+  // Parse based on response structure
+  if (xml.includes('<RunInstancesResponse>')) {
+    result.Instances = [{
+      InstanceId: extractTag('instanceId'),
+      State: { Name: extractTag('name') },
+      PublicIpAddress: extractTag('ipAddress'),
+      Placement: { AvailabilityZone: extractTag('availabilityZone') },
+      InstanceType: extractTag('instanceType')
+    }];
+  } else if (xml.includes('<DescribeInstancesResponse>')) {
+    result.Reservations = [{
+      Instances: [{
+        InstanceId: extractTag('instanceId'),
+        State: { Name: extractTag('name') },
+        PublicIpAddress: extractTag('ipAddress'),
+        Placement: { AvailabilityZone: extractTag('availabilityZone') },
+        InstanceType: extractTag('instanceType'),
+        Tags: extractAll('key').map((key, i) => ({
+          Key: key,
+          Value: extractAll('value')[i]
+        }))
+      }]
+    }];
+  } else if (xml.includes('<CreateSecurityGroupResponse>')) {
+    result.GroupId = extractTag('groupId');
+  } else if (xml.includes('<DescribeSecurityGroupsResponse>')) {
+    const groupIds = extractAll('groupId');
+    result.SecurityGroups = groupIds.map(id => ({ GroupId: id }));
+  }
+
+  return result;
+}
