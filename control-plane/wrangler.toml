@@ -15,6 +15,41 @@ migrations_dir = "drizzle"
 # class_name = "BotProvisioningWorkflow"
 # script_name = "crack401-control-plan-api"
 
+# Durable Objects
+[[durable_objects.bindings]]
+name = "GLOBAL_SCHEDULER"
+class_name = "GlobalSchedulerDO"
+
+[[durable_objects.bindings]]
+name = "NODE_MANAGER"
+class_name = "NodeManagerDO"
+
+[[durable_objects.bindings]]
+name = "SANDBOX_TRACKER"
+class_name = "SandboxTrackerDO"
+
+[[durable_objects.bindings]]
+name = "TENANT_QUOTA"
+class_name = "TenantQuotaDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["GlobalSchedulerDO", "NodeManagerDO", "SandboxTrackerDO", "TenantQuotaDO"]
+
+# R2
+[[r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "sandbox-snapshots"
+
+# KV
+[[kv_namespaces]]
+binding = "TENANT_KEYS"
+id = "placeholder-tenant-keys"
+
+[[kv_namespaces]]
+binding = "NODE_TOKENS"
+id = "placeholder-node-tokens"
+
 [vars]
 MOCK_EXTERNAL_SERVICES = "true"
 FRONTEND_URL = "http://localhost:3000"

@@ -3,6 +3,7 @@
 import { installAWSPolyfills } from "./lib/polyfills/dom-parser";
 installAWSPolyfills();
 
+import { OpenAPIHono } from "@hono/zod-openapi";
 import { Hono } from "hono";
 import type { Env } from "./types";
 import { createAuth } from "./lib/auth";
@@ -19,10 +20,37 @@ import billingRoutes from "./routes/billing";
 import sshKeysRoutes from "./routes/ssh-keys";
 import testAwsRoutes from "./routes/test-aws";
 
+// Sandbox API imports
+import { requestIdMiddleware } from "./middleware/request-id";
+import { sandboxAuthMiddleware } from "./middleware/sandbox-auth";
+import { nodeAuthMiddleware } from "./middleware/node-auth";
+import { operatorAuthMiddleware } from "./middleware/operator-auth";
+import sandboxRoutes from "./routes/sandboxes/sandboxes";
+import lifecycleRoutes from "./routes/sandboxes/lifecycle";
+import execRoutes from "./routes/sandboxes/exec";
+import filesRoutes from "./routes/sandboxes/files";
+import snapshotsRoutes from "./routes/sandboxes/snapshots";
+import portsRoutes from "./routes/sandboxes/ports";
+import webhooksRoutes from "./routes/sandboxes/webhooks";
+import nodeInternalRoutes from "./routes/nodes/internal";
+import mgmtNodesRoutes from "./routes/mgmt/nodes";
+import mgmtFleetRoutes from "./routes/mgmt/fleet";
+import mgmtTenantsRoutes from "./routes/mgmt/tenants";
+import obsEventsRoutes from "./routes/obs/events";
+import obsBillingRoutes from "./routes/obs/billing";
+import obsAuditRoutes from "./routes/obs/audit";
+import obsMetricsRoutes from "./routes/obs/metrics";
+
 // Export workflow for Cloudflare Workers
 export { BotProvisioningWorkflow } from "./workflows/bot-provisioning";
 
-const app = new Hono<Env>();
+// Export Durable Objects for Cloudflare Workers
+export { GlobalSchedulerDO } from "./durable-objects/global-scheduler";
+export { NodeManagerDO } from "./durable-objects/node-manager";
+export { SandboxTrackerDO } from "./durable-objects/sandbox-tracker";
+export { TenantQuotaDO } from "./durable-objects/tenant-quota";
+
+const app = new OpenAPIHono<Env>();
 
 // Track if migrations have run for this Worker instance
 let migrationsRun = false;
@@ -117,6 +145,93 @@ protectedApi.route("/billing", billingRoutes);
 protectedApi.route("/ssh-keys", sshKeysRoutes);
 
 app.route("/v1", protectedApi);
+
+// ====== Sandbox API Routes ======
+
+// Request ID middleware for all sandbox API routes
+app.use("/v1/sandboxes/*", requestIdMiddleware);
+app.use("/v1/webhooks/*", requestIdMiddleware);
+app.use("/v1/internal/*", requestIdMiddleware);
+app.use("/v1/mgmt/*", requestIdMiddleware);
+app.use("/v1/obs/*", requestIdMiddleware);
+
+// Workload API (tenant auth)
+const sandboxApi = new OpenAPIHono<Env>();
+sandboxApi.use("*", sandboxAuthMiddleware);
+sandboxApi.route("/", sandboxRoutes);
+sandboxApi.route("/", lifecycleRoutes);
+sandboxApi.route("/", execRoutes);
+sandboxApi.route("/", filesRoutes);
+sandboxApi.route("/", snapshotsRoutes);
+sandboxApi.route("/", portsRoutes);
+app.route("/v1/sandboxes", sandboxApi);
+
+// Webhooks (tenant auth)
+const webhookApi = new OpenAPIHono<Env>();
+webhookApi.use("*", sandboxAuthMiddleware);
+webhookApi.route("/", webhooksRoutes);
+app.route("/v1/webhooks", webhookApi);
+
+// Node API (node auth)
+const nodeApi = new OpenAPIHono<Env>();
+nodeApi.use("*", nodeAuthMiddleware);
+nodeApi.route("/", nodeInternalRoutes);
+app.route("/v1/internal/nodes", nodeApi);
+
+// Management API (operator auth)
+const mgmtApi = new OpenAPIHono<Env>();
+mgmtApi.use("*", operatorAuthMiddleware);
+mgmtApi.route("/nodes", mgmtNodesRoutes);
+mgmtApi.route("/fleet", mgmtFleetRoutes);
+mgmtApi.route("/tenants", mgmtTenantsRoutes);
+app.route("/v1/mgmt", mgmtApi);
+
+// Observability API (tenant auth)
+const obsApi = new OpenAPIHono<Env>();
+obsApi.use("*", sandboxAuthMiddleware);
+obsApi.route("/events", obsEventsRoutes);
+obsApi.route("/billing", obsBillingRoutes);
+obsApi.route("/audit", obsAuditRoutes);
+obsApi.route("/fleet/metrics", obsMetricsRoutes);
+app.route("/v1/obs", obsApi);
+
+// --- OpenAPI spec endpoint ---
+app.doc("/openapi.json", {
+  openapi: "3.1.0",
+  info: {
+    title: "Crack402 Sandbox API",
+    version: "1.0.0",
+    description: "API for managing cloud sandboxes with x402 payment support",
+  },
+  servers: [{ url: "https://api.crack402.com" }],
+  security: [],
+  "x-tagGroups": [
+    { name: "Sandboxes", tags: ["Sandboxes", "Webhooks"] },
+    { name: "Management", tags: ["Management (Nodes)", "Management (Fleet)", "Management (Tenants)"] },
+    { name: "Observability", tags: ["Observability"] },
+    { name: "Internal", tags: ["Internal (Node)"] },
+  ],
+} as any);
+
+// --- OpenAPI security schemes (registered on the registry) ---
+app.openAPIRegistry.registerComponent("securitySchemes", "TenantApiKey", {
+  type: "apiKey",
+  in: "header",
+  name: "X-API-Key",
+  description: "Tenant API key for sandbox operations",
+});
+app.openAPIRegistry.registerComponent("securitySchemes", "NodeToken", {
+  type: "apiKey",
+  in: "header",
+  name: "Authorization",
+  description: "Node bootstrap token (Bearer)",
+});
+app.openAPIRegistry.registerComponent("securitySchemes", "OperatorApiKey", {
+  type: "apiKey",
+  in: "header",
+  name: "X-Operator-Key",
+  description: "Operator API key for management operations",
+});
 
 // --- 404 fallback ---
 app.notFound((c) => {

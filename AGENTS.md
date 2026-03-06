@@ -7,3 +7,6 @@
   - config file - `.pre-commit-config.yaml`
   - `prek install` to install
   - `pre commit run --all` to run all hooks
+
+## CLI Commands
+

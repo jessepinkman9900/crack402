@@ -1,0 +1,4137 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Crack402 Sandbox API",
+    "version": "1.0.0",
+    "description": "API for managing cloud sandboxes with x402 payment support"
+  },
+  "servers": [
+    {
+      "url": "https://api.crack402.com"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "TenantApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "Tenant API key for sandbox operations"
+      },
+      "NodeToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Node bootstrap token (Bearer)"
+      },
+      "OperatorApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Operator-Key",
+        "description": "Operator API key for management operations"
+      }
+    },
+    "schemas": {
+      "Sandbox": {
+        "type": "object",
+        "properties": {
+          "sandbox_id": {
+            "type": "string",
+            "description": "Unique sandbox identifier",
+            "example": "sbx_abc12345678901234567"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SandboxStatus"
+          },
+          "base_image": {
+            "type": "string",
+            "description": "Base container image",
+            "example": "ubuntu:22.04"
+          },
+          "vcpu": {
+            "type": "number",
+            "description": "Allocated virtual CPUs",
+            "example": 2
+          },
+          "memory_mb": {
+            "type": "integer",
+            "description": "Allocated memory in MB",
+            "example": 2048
+          },
+          "gpu": {
+            "type": "string",
+            "nullable": true,
+            "description": "GPU type or null"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "description": "Max sandbox lifetime in seconds",
+            "example": 3600
+          },
+          "idle_timeout_seconds": {
+            "type": "integer",
+            "description": "Idle timeout in seconds",
+            "example": 600
+          },
+          "network_policy": {
+            "type": "string",
+            "description": "Network access policy",
+            "example": "outbound-only"
+          },
+          "env_vars": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Environment variables"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Arbitrary key-value metadata",
+            "example": {
+              "env": "production",
+              "team": "backend"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 creation timestamp",
+            "example": "2026-01-15T12:00:00Z"
+          },
+          "started_at": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "ISO 8601 start timestamp, null if not started"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 expiration timestamp"
+          },
+          "public_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "Public URL for the sandbox",
+            "example": "https://sbx-abc123.sandbox.example.com"
+          },
+          "private_ip": {
+            "type": "string",
+            "nullable": true,
+            "description": "Private IP address",
+            "example": "10.0.1.5"
+          },
+          "region": {
+            "type": "string",
+            "description": "Deployment region",
+            "example": "us-east-1"
+          },
+          "isolation_backend": {
+            "$ref": "#/components/schemas/IsolationBackend"
+          },
+          "cost_accrued_usd": {
+            "type": "number",
+            "description": "Total cost accrued in USD",
+            "example": 0.42
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SandboxEvent"
+            },
+            "description": "Recent sandbox events"
+          }
+        },
+        "required": [
+          "sandbox_id",
+          "status",
+          "base_image",
+          "vcpu",
+          "memory_mb",
+          "gpu",
+          "timeout_seconds",
+          "idle_timeout_seconds",
+          "network_policy",
+          "created_at",
+          "started_at"
+        ]
+      },
+      "SandboxStatus": {
+        "type": "string",
+        "enum": [
+          "provisioning",
+          "ready",
+          "running",
+          "paused",
+          "stopping",
+          "stopped",
+          "error",
+          "destroyed"
+        ],
+        "description": "Current sandbox status"
+      },
+      "IsolationBackend": {
+        "type": "string",
+        "enum": [
+          "firecracker",
+          "gvisor",
+          "kata",
+          "wasm",
+          "container",
+          "v8-isolate"
+        ],
+        "description": "Isolation technology used"
+      },
+      "SandboxEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Event type",
+            "example": "state_change"
+          },
+          "status": {
+            "type": "string",
+            "description": "Sandbox status at event time",
+            "example": "running"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 event timestamp",
+            "example": "2026-01-15T12:00:00Z"
+          }
+        },
+        "required": [
+          "type",
+          "status",
+          "timestamp"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error message",
+            "example": "The requested sandbox does not exist"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            },
+            "description": "Additional error context"
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Request ID for support reference",
+            "example": "req_abc123"
+          }
+        },
+        "required": [
+          "error",
+          "message"
+        ]
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "invalid_request",
+          "unauthorized",
+          "forbidden",
+          "sandbox_not_found",
+          "sandbox_state_conflict",
+          "exec_timeout",
+          "resource_limit_exceeded",
+          "capacity_exhausted",
+          "payment_required",
+          "rate_limited",
+          "internal_error"
+        ],
+        "description": "Machine-readable error code",
+        "example": "sandbox_not_found"
+      },
+      "CreateSandboxRequest": {
+        "type": "object",
+        "properties": {
+          "base_image": {
+            "type": "string",
+            "description": "Base container image",
+            "example": "ubuntu:22.04"
+          },
+          "vcpu": {
+            "type": "number",
+            "minimum": 0.25,
+            "maximum": 32,
+            "default": 2,
+            "description": "Number of virtual CPUs",
+            "example": 2
+          },
+          "memory_mb": {
+            "type": "integer",
+            "minimum": 256,
+            "maximum": 131072,
+            "default": 2048,
+            "description": "Memory allocation in MB",
+            "example": 2048
+          },
+          "gpu": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "T4",
+              "L4",
+              "A10G",
+              "L40S",
+              "A100-40",
+              "A100-80",
+              "H100",
+              "H200",
+              "B200",
+              null
+            ],
+            "description": "GPU type, null for no GPU"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 86400,
+            "default": 3600,
+            "description": "Max sandbox lifetime in seconds",
+            "example": 3600
+          },
+          "idle_timeout_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 86400,
+            "default": 600,
+            "description": "Idle timeout before auto-pause/destroy in seconds",
+            "example": 600
+          },
+          "auto_destroy": {
+            "type": "boolean",
+            "default": true,
+            "description": "Destroy sandbox when timeout expires",
+            "example": true
+          },
+          "auto_pause_on_idle": {
+            "type": "boolean",
+            "default": false,
+            "description": "Pause sandbox when idle instead of destroying",
+            "example": false
+          },
+          "code": {
+            "type": "string",
+            "nullable": true,
+            "description": "Inline code to execute on start"
+          },
+          "language": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "python",
+              "javascript",
+              "typescript",
+              "ruby",
+              "go",
+              "rust",
+              "java",
+              "bash",
+              null
+            ],
+            "description": "Language for inline code execution"
+          },
+          "github_repo": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "GitHub repository URL",
+                "example": "https://github.com/org/repo"
+              },
+              "branch": {
+                "type": "string",
+                "default": "main",
+                "description": "Branch to clone",
+                "example": "main"
+              },
+              "commit": {
+                "type": "string",
+                "description": "Specific commit SHA to checkout",
+                "example": "a1b2c3d4"
+              },
+              "path": {
+                "type": "string",
+                "default": "/workspace",
+                "description": "Path to clone into",
+                "example": "/workspace"
+              },
+              "token": {
+                "type": "string",
+                "description": "GitHub access token for private repos"
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "description": "GitHub repo to clone into the sandbox"
+          },
+          "env_vars": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Environment variables to set",
+            "example": {
+              "NODE_ENV": "production"
+            }
+          },
+          "network_policy": {
+            "$ref": "#/components/schemas/NetworkPolicy"
+          },
+          "exposed_ports": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "Ports to expose publicly",
+            "example": [
+              3000,
+              8080
+            ]
+          },
+          "volumes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Volume name",
+                  "example": "data"
+                },
+                "mount_path": {
+                  "type": "string",
+                  "description": "Mount path inside sandbox",
+                  "example": "/data"
+                },
+                "size_gb": {
+                  "type": "number",
+                  "description": "Volume size in GB",
+                  "example": 10
+                }
+              },
+              "required": [
+                "name",
+                "mount_path",
+                "size_gb"
+              ]
+            },
+            "description": "Persistent volumes to attach"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Arbitrary key-value metadata",
+            "example": {
+              "env": "production",
+              "team": "backend"
+            }
+          },
+          "payment": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "method": {
+                "type": "string",
+                "enum": [
+                  "x402",
+                  "api_key_billing",
+                  "prepaid_credits"
+                ],
+                "description": "Payment method",
+                "example": "api_key_billing"
+              },
+              "x402_signature": {
+                "type": "string",
+                "description": "x402 payment signature"
+              },
+              "budget_limit_usd": {
+                "type": "number",
+                "description": "Maximum budget in USD",
+                "example": 10
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "description": "Payment information"
+          }
+        },
+        "required": [
+          "base_image"
+        ]
+      },
+      "NetworkPolicy": {
+        "type": "string",
+        "enum": [
+          "none",
+          "outbound-only",
+          "full"
+        ],
+        "default": "outbound-only",
+        "description": "Network access policy",
+        "example": "outbound-only"
+      },
+      "ExecResult": {
+        "type": "object",
+        "properties": {
+          "exec_id": {
+            "type": "string",
+            "description": "Unique execution identifier",
+            "example": "exec_abc12345678901234567"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExecStatus"
+          },
+          "exit_code": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Process exit code, null if still running",
+            "example": 0
+          },
+          "stdout": {
+            "type": "string",
+            "description": "Standard output from the execution"
+          },
+          "stderr": {
+            "type": "string",
+            "description": "Standard error from the execution"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "description": "Execution duration in milliseconds",
+            "example": 1523
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 execution start timestamp",
+            "example": "2026-01-15T12:00:00Z"
+          },
+          "completed_at": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "ISO 8601 completion timestamp, null if still running"
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Artifact"
+            },
+            "description": "Files produced by the execution"
+          }
+        },
+        "required": [
+          "exec_id",
+          "status",
+          "exit_code",
+          "stdout",
+          "stderr",
+          "duration_ms",
+          "started_at",
+          "completed_at"
+        ]
+      },
+      "ExecStatus": {
+        "type": "string",
+        "enum": [
+          "running",
+          "completed",
+          "failed",
+          "timed_out",
+          "cancelled"
+        ],
+        "description": "Current execution status"
+      },
+      "Artifact": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path of the artifact",
+            "example": "/workspace/output.csv"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "description": "Artifact size in bytes",
+            "example": 4096
+          },
+          "mime_type": {
+            "type": "string",
+            "description": "MIME type of the artifact",
+            "example": "text/csv"
+          },
+          "download_url": {
+            "type": "string",
+            "description": "URL to download the artifact"
+          }
+        },
+        "required": [
+          "path",
+          "size_bytes",
+          "mime_type"
+        ]
+      },
+      "ExecRequest": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "code",
+              "command",
+              "file"
+            ],
+            "description": "Execution type",
+            "example": "code"
+          },
+          "code": {
+            "type": "string",
+            "description": "Inline code to execute",
+            "example": "print('hello')"
+          },
+          "language": {
+            "$ref": "#/components/schemas/Language"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "Shell command to run",
+            "example": "ls -la"
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Path to a script file to execute",
+            "example": "/workspace/script.py"
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Arguments to pass to the command or script",
+            "example": [
+              "--verbose"
+            ]
+          },
+          "working_dir": {
+            "type": "string",
+            "default": "/workspace",
+            "description": "Working directory for execution",
+            "example": "/workspace"
+          },
+          "env_vars": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Environment variables for this execution"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400,
+            "default": 300,
+            "description": "Execution timeout in seconds",
+            "example": 300
+          },
+          "stdin": {
+            "type": "string",
+            "description": "Standard input to pipe to the process"
+          },
+          "async": {
+            "type": "boolean",
+            "default": false,
+            "description": "Run asynchronously and return immediately",
+            "example": false
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "Language": {
+        "type": "string",
+        "enum": [
+          "python",
+          "javascript",
+          "typescript",
+          "ruby",
+          "go",
+          "rust",
+          "java",
+          "bash"
+        ],
+        "description": "Language for code execution"
+      },
+      "WriteFileRequest": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute file path inside the sandbox",
+            "example": "/workspace/main.py"
+          },
+          "content": {
+            "type": "string",
+            "description": "File content"
+          },
+          "encoding": {
+            "type": "string",
+            "enum": [
+              "utf-8",
+              "base64"
+            ],
+            "default": "utf-8",
+            "description": "Content encoding",
+            "example": "utf-8"
+          },
+          "permissions": {
+            "type": "string",
+            "description": "Unix file permissions",
+            "example": "0644"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      },
+      "FileListResponse": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "description": "Listed directory path",
+            "example": "/workspace"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileEntry"
+            },
+            "description": "Files and directories in the listed path"
+          }
+        },
+        "required": [
+          "directory",
+          "files"
+        ]
+      },
+      "FileEntry": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File or directory path",
+            "example": "/workspace/src/index.ts"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "file",
+              "directory",
+              "symlink"
+            ],
+            "description": "Entry type",
+            "example": "file"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "description": "Size in bytes (0 for directories)",
+            "example": 2048
+          },
+          "modified_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 last modified timestamp",
+            "example": "2026-01-15T12:00:00Z"
+          }
+        },
+        "required": [
+          "path",
+          "type",
+          "size_bytes",
+          "modified_at"
+        ]
+      },
+      "Snapshot": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "description": "Unique snapshot identifier",
+            "example": "snap_abc12345678901234567"
+          },
+          "sandbox_id": {
+            "type": "string",
+            "description": "ID of the sandbox this snapshot was taken from",
+            "example": "sbx_abc12345678901234567"
+          },
+          "name": {
+            "type": "string",
+            "description": "Snapshot name"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 creation timestamp",
+            "example": "2026-01-15T12:00:00Z"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "description": "Snapshot size in bytes",
+            "example": 536870912
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Arbitrary key-value metadata",
+            "example": {
+              "env": "production",
+              "team": "backend"
+            }
+          },
+          "expires_at": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time",
+            "description": "ISO 8601 expiration timestamp, null if no expiry"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "sandbox_id",
+          "created_at",
+          "size_bytes",
+          "expires_at"
+        ]
+      },
+      "CreateSnapshotRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Human-readable snapshot name",
+            "example": "pre-deploy-checkpoint"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Arbitrary key-value metadata",
+            "example": {
+              "env": "production",
+              "team": "backend"
+            }
+          }
+        }
+      },
+      "FromSnapshotRequest": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "description": "Snapshot ID to restore from",
+            "example": "snap_abc12345678901234567"
+          },
+          "override_env_vars": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Environment variables to override from the snapshot"
+          },
+          "override_timeout_seconds": {
+            "type": "integer",
+            "description": "Override the timeout from the snapshot",
+            "example": 7200
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Metadata for the new sandbox",
+            "example": {
+              "env": "production",
+              "team": "backend"
+            }
+          }
+        },
+        "required": [
+          "snapshot_id"
+        ]
+      },
+      "Webhook": {
+        "type": "object",
+        "properties": {
+          "webhook_id": {
+            "type": "string",
+            "description": "Unique webhook ID",
+            "example": "wh_abc123"
+          },
+          "url": {
+            "type": "string",
+            "description": "Webhook callback URL"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Subscribed event types"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 creation timestamp"
+          }
+        },
+        "required": [
+          "webhook_id",
+          "url",
+          "events",
+          "created_at"
+        ]
+      },
+      "CreateWebhookRequest": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Webhook callback URL",
+            "example": "https://example.com/webhook"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Event types to subscribe to"
+          },
+          "secret": {
+            "type": "string",
+            "description": "Shared secret for webhook signatures"
+          }
+        },
+        "required": [
+          "url",
+          "events"
+        ]
+      },
+      "Heartbeat": {
+        "type": "object",
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "description": "Node identifier",
+            "example": "node_abc12345678901234567"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 heartbeat timestamp",
+            "example": "2026-01-15T12:00:00Z"
+          },
+          "total_vcpu": {
+            "type": "number",
+            "description": "Total vCPUs available on the node",
+            "example": 64
+          },
+          "used_vcpu": {
+            "type": "number",
+            "description": "Currently used vCPUs",
+            "example": 12
+          },
+          "total_memory_mb": {
+            "type": "integer",
+            "description": "Total memory in MB",
+            "example": 262144
+          },
+          "used_memory_mb": {
+            "type": "integer",
+            "description": "Currently used memory in MB",
+            "example": 65536
+          },
+          "sandbox_count": {
+            "type": "integer",
+            "description": "Number of active sandboxes",
+            "example": 6
+          },
+          "sandbox_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IDs of active sandboxes on this node"
+          },
+          "firecracker_version": {
+            "type": "string",
+            "description": "Firecracker version",
+            "example": "1.7.0"
+          },
+          "disk_free_gb": {
+            "type": "number",
+            "description": "Free disk space in GB",
+            "example": 450.5
+          },
+          "status": {
+            "$ref": "#/components/schemas/NodeStatus"
+          }
+        },
+        "required": [
+          "node_id",
+          "timestamp",
+          "total_vcpu",
+          "used_vcpu",
+          "total_memory_mb",
+          "used_memory_mb",
+          "sandbox_count",
+          "sandbox_ids",
+          "status"
+        ]
+      },
+      "NodeStatus": {
+        "type": "string",
+        "enum": [
+          "healthy",
+          "degraded",
+          "draining",
+          "cordoned",
+          "offline"
+        ],
+        "description": "Current node health status"
+      },
+      "SandboxStateEvent": {
+        "type": "object",
+        "properties": {
+          "sandbox_id": {
+            "type": "string",
+            "description": "Sandbox identifier",
+            "example": "sbx_abc12345678901234567"
+          },
+          "status": {
+            "type": "string",
+            "description": "New sandbox status",
+            "example": "running"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 event timestamp",
+            "example": "2026-01-15T12:00:00Z"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if status is error"
+          }
+        },
+        "required": [
+          "sandbox_id",
+          "status",
+          "timestamp"
+        ]
+      },
+      "ExecEvent": {
+        "type": "object",
+        "properties": {
+          "exec_id": {
+            "type": "string",
+            "description": "Execution identifier",
+            "example": "exec_abc12345678901234567"
+          },
+          "sandbox_id": {
+            "type": "string",
+            "description": "Sandbox identifier",
+            "example": "sbx_abc12345678901234567"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "timed_out"
+            ],
+            "description": "Execution status",
+            "example": "completed"
+          },
+          "exit_code": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Process exit code",
+            "example": 0
+          },
+          "stdout": {
+            "type": "string",
+            "description": "Standard output"
+          },
+          "stderr": {
+            "type": "string",
+            "description": "Standard error"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "description": "Execution duration in milliseconds",
+            "example": 1523
+          }
+        },
+        "required": [
+          "exec_id",
+          "sandbox_id",
+          "status"
+        ]
+      },
+      "Command": {
+        "type": "object",
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "description": "Unique command identifier",
+            "example": "cmd_abc12345678901234567"
+          },
+          "type": {
+            "$ref": "#/components/schemas/CommandType"
+          },
+          "sandbox_id": {
+            "type": "string",
+            "description": "Target sandbox ID, if applicable"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            },
+            "description": "Command-specific payload data"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 creation timestamp",
+            "example": "2026-01-15T12:00:00Z"
+          }
+        },
+        "required": [
+          "command_id",
+          "type",
+          "payload",
+          "created_at"
+        ]
+      },
+      "CommandType": {
+        "type": "string",
+        "enum": [
+          "create_sandbox",
+          "destroy_sandbox",
+          "pause_sandbox",
+          "resume_sandbox",
+          "snapshot_sandbox",
+          "restore_snapshot",
+          "exec",
+          "update_tunnel",
+          "drain"
+        ],
+        "description": "Command type to execute"
+      },
+      "CommandResult": {
+        "type": "object",
+        "properties": {
+          "command_id": {
+            "type": "string",
+            "description": "Command identifier",
+            "example": "cmd_abc12345678901234567"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure"
+            ],
+            "description": "Command execution result",
+            "example": "success"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if status is failure"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            },
+            "description": "Result payload data"
+          }
+        },
+        "required": [
+          "command_id",
+          "status"
+        ]
+      },
+      "RegisterNodeRequest": {
+        "type": "object",
+        "properties": {
+          "region": {
+            "type": "string",
+            "description": "Node deployment region",
+            "example": "us-east-1"
+          },
+          "total_vcpu": {
+            "type": "number",
+            "description": "Total vCPUs available",
+            "example": 64
+          },
+          "total_memory_mb": {
+            "type": "integer",
+            "description": "Total memory in MB",
+            "example": 262144
+          },
+          "firecracker_version": {
+            "type": "string",
+            "description": "Firecracker version",
+            "example": "1.7.0"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Node metadata"
+          }
+        },
+        "required": [
+          "region",
+          "total_vcpu",
+          "total_memory_mb"
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/v1/sandboxes": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Create a new sandbox",
+        "description": "Provision a new sandbox with the specified configuration.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSandboxRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sandbox created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sandbox"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Resource limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No capacity available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "List sandboxes",
+        "description": "List all sandboxes for the authenticated tenant.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Filter by sandbox status"
+            },
+            "required": false,
+            "description": "Filter by sandbox status",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Maximum number of results",
+              "example": "50"
+            },
+            "required": false,
+            "description": "Maximum number of results",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Pagination cursor"
+            },
+            "required": false,
+            "description": "Pagination cursor",
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of sandboxes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sandboxes": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Sandbox"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "total_count": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "sandboxes",
+                    "next_cursor",
+                    "total_count"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandboxId}": {
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Get sandbox details",
+        "description": "Retrieve details for a specific sandbox.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sandbox ID"
+            },
+            "required": true,
+            "description": "Sandbox ID",
+            "name": "sandboxId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sandbox details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sandbox"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Destroy a sandbox",
+        "description": "Permanently destroy a sandbox and release its resources.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sandbox ID"
+            },
+            "required": true,
+            "description": "Sandbox ID",
+            "name": "sandboxId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Sandbox destroyed"
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sandbox state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandboxId}/wait": {
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Wait for sandbox state",
+        "description": "Long-poll until a sandbox reaches the desired state.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sandbox ID"
+            },
+            "required": true,
+            "description": "Sandbox ID",
+            "name": "sandboxId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Target state to wait for"
+            },
+            "required": true,
+            "description": "Target state to wait for",
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Max seconds to wait (default 60)",
+              "example": "60"
+            },
+            "required": false,
+            "description": "Max seconds to wait (default 60)",
+            "name": "timeout_seconds",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sandbox reached desired state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sandbox_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sandbox_id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing state parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Timeout waiting for state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandboxId}/start": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Start a sandbox",
+        "description": "Transition a sandbox to the running state.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sandbox ID"
+            },
+            "required": true,
+            "description": "Sandbox ID",
+            "name": "sandboxId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sandbox started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sandbox_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sandbox_id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sandbox state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandboxId}/stop": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Stop a sandbox",
+        "description": "Gracefully stop a running sandbox.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sandbox ID"
+            },
+            "required": true,
+            "description": "Sandbox ID",
+            "name": "sandboxId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sandbox stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sandbox_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sandbox_id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sandbox state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandboxId}/pause": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Pause a sandbox",
+        "description": "Pause a running sandbox to save resources.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sandbox ID"
+            },
+            "required": true,
+            "description": "Sandbox ID",
+            "name": "sandboxId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sandbox paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sandbox_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sandbox_id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sandbox state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandboxId}/exec": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Execute code or command",
+        "description": "Execute code, a command, or a file inside a sandbox.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sandbox ID"
+            },
+            "required": true,
+            "description": "Sandbox ID",
+            "name": "sandboxId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Execution completed (synchronous mode)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecResult"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Execution started (async mode)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "exec_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "poll_url": {
+                      "type": "string"
+                    },
+                    "stream_url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "exec_id",
+                    "status",
+                    "poll_url",
+                    "stream_url"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Execution timed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sandbox state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandboxId}/exec/{execId}": {
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Get execution result",
+        "description": "Retrieve the result of a previous execution.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sandbox ID"
+            },
+            "required": true,
+            "description": "Sandbox ID",
+            "name": "sandboxId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Execution ID"
+            },
+            "required": true,
+            "description": "Execution ID",
+            "name": "execId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Execution result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Execution not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandboxId}/files": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Write a file",
+        "description": "Write a file to the sandbox filesystem.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sandbox ID"
+            },
+            "required": true,
+            "description": "Sandbox ID",
+            "name": "sandboxId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WriteFileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "File written successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "size_bytes": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "size_bytes"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandboxId}/files-list": {
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "List files",
+        "description": "List files in a directory within the sandbox.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sandbox ID"
+            },
+            "required": true,
+            "description": "Sandbox ID",
+            "name": "sandboxId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Directory to list (default /workspace)"
+            },
+            "required": false,
+            "description": "Directory to list (default /workspace)",
+            "name": "directory",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File listing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandboxId}/snapshots": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Create a snapshot",
+        "description": "Create a snapshot of a sandbox's current state.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sandbox ID"
+            },
+            "required": true,
+            "description": "Sandbox ID",
+            "name": "sandboxId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSnapshotRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Snapshot created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Snapshot"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sandbox state conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/from-snapshot": {
+      "post": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "Create sandbox from snapshot",
+        "description": "Create a new sandbox from an existing snapshot.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FromSnapshotRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sandbox created from snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sandbox_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "base_image": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sandbox_id",
+                    "status",
+                    "base_image",
+                    "created_at"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Snapshot not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sandboxes/{sandboxId}/ports": {
+      "get": {
+        "tags": [
+          "Sandboxes"
+        ],
+        "summary": "List exposed ports",
+        "description": "List all exposed ports for a sandbox.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Sandbox ID"
+            },
+            "required": true,
+            "description": "Sandbox ID",
+            "name": "sandboxId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of ports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ports": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "port": {
+                            "type": "integer"
+                          },
+                          "protocol": {
+                            "type": "string"
+                          },
+                          "public_url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "port"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "ports"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Register a webhook",
+        "description": "Register a new webhook endpoint to receive event notifications.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebhookRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Webhook created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Webhook"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "List webhooks",
+        "description": "List all registered webhooks for the authenticated tenant.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of webhooks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "webhooks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Webhook"
+                      }
+                    }
+                  },
+                  "required": [
+                    "webhooks"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/{id}": {
+      "delete": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Delete a webhook",
+        "description": "Unregister a webhook endpoint.",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Webhook ID"
+            },
+            "required": true,
+            "description": "Webhook ID",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Webhook deleted"
+          },
+          "404": {
+            "description": "Webhook not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/internal/nodes/{nodeId}/heartbeat": {
+      "post": {
+        "tags": [
+          "Internal (Node)"
+        ],
+        "summary": "Node heartbeat",
+        "description": "Receive heartbeat from a node with resource usage information",
+        "security": [
+          {
+            "NodeToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Node ID"
+            },
+            "required": true,
+            "description": "Node ID",
+            "name": "nodeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Heartbeat"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Heartbeat accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid heartbeat payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/internal/nodes/{nodeId}/sandbox-events": {
+      "post": {
+        "tags": [
+          "Internal (Node)"
+        ],
+        "summary": "Report sandbox state event",
+        "description": "Report a sandbox state change from a node",
+        "security": [
+          {
+            "NodeToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Node ID"
+            },
+            "required": true,
+            "description": "Node ID",
+            "name": "nodeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SandboxStateEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Event processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "transitioned": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "transitioned"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid sandbox event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/internal/nodes/{nodeId}/exec-events": {
+      "post": {
+        "tags": [
+          "Internal (Node)"
+        ],
+        "summary": "Report exec event",
+        "description": "Report an execution event from a node",
+        "security": [
+          {
+            "NodeToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Node ID"
+            },
+            "required": true,
+            "description": "Node ID",
+            "name": "nodeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exec event processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid exec event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/internal/nodes/{nodeId}/commands": {
+      "get": {
+        "tags": [
+          "Internal (Node)"
+        ],
+        "summary": "Get pending commands",
+        "description": "Long-poll for pending commands for a node",
+        "security": [
+          {
+            "NodeToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Node ID"
+            },
+            "required": true,
+            "description": "Node ID",
+            "name": "nodeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending commands",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "commands": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Command"
+                      }
+                    }
+                  },
+                  "required": [
+                    "commands"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/internal/nodes/{nodeId}/commands/{cmdId}/ack": {
+      "post": {
+        "tags": [
+          "Internal (Node)"
+        ],
+        "summary": "Acknowledge command",
+        "description": "Acknowledge receipt of a command",
+        "security": [
+          {
+            "NodeToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Node ID"
+            },
+            "required": true,
+            "description": "Node ID",
+            "name": "nodeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Command ID"
+            },
+            "required": true,
+            "description": "Command ID",
+            "name": "cmdId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Command acknowledged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/internal/nodes/{nodeId}/commands/{cmdId}/result": {
+      "post": {
+        "tags": [
+          "Internal (Node)"
+        ],
+        "summary": "Report command result",
+        "description": "Report the result of a command execution",
+        "security": [
+          {
+            "NodeToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Node ID"
+            },
+            "required": true,
+            "description": "Node ID",
+            "name": "nodeId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Command ID"
+            },
+            "required": true,
+            "description": "Command ID",
+            "name": "cmdId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandResult"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mgmt/nodes": {
+      "post": {
+        "tags": [
+          "Management (Nodes)"
+        ],
+        "summary": "Register a new node",
+        "description": "Register a new compute node in the fleet",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterNodeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Node registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "node_id": {
+                      "type": "string"
+                    },
+                    "bootstrap_token": {
+                      "type": "string"
+                    },
+                    "region": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "node_id",
+                    "bootstrap_token",
+                    "region",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid node registration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Management (Nodes)"
+        ],
+        "summary": "List all nodes",
+        "description": "List all registered compute nodes",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of nodes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "node_id": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "region": {
+                            "type": "string"
+                          },
+                          "total_vcpu": {
+                            "type": "number"
+                          },
+                          "total_memory_mb": {
+                            "type": "number"
+                          },
+                          "firecracker_version": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "last_heartbeat_at": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "created_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "node_id",
+                          "status",
+                          "region",
+                          "total_vcpu",
+                          "total_memory_mb",
+                          "firecracker_version",
+                          "last_heartbeat_at",
+                          "created_at"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "nodes"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mgmt/nodes/{nodeId}": {
+      "get": {
+        "tags": [
+          "Management (Nodes)"
+        ],
+        "summary": "Get node details",
+        "description": "Get details for a specific node",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Node ID"
+            },
+            "required": true,
+            "description": "Node ID",
+            "name": "nodeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Node details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "node_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "region": {
+                      "type": "string"
+                    },
+                    "total_vcpu": {
+                      "type": "number"
+                    },
+                    "total_memory_mb": {
+                      "type": "number"
+                    },
+                    "firecracker_version": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "last_heartbeat_at": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "created_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "node_id",
+                    "status",
+                    "region",
+                    "total_vcpu",
+                    "total_memory_mb",
+                    "firecracker_version",
+                    "last_heartbeat_at",
+                    "created_at"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Node not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Management (Nodes)"
+        ],
+        "summary": "Delete a node",
+        "description": "Unregister a node from the fleet",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Node ID"
+            },
+            "required": true,
+            "description": "Node ID",
+            "name": "nodeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Node deleted"
+          }
+        }
+      }
+    },
+    "/v1/mgmt/nodes/{nodeId}/drain": {
+      "post": {
+        "tags": [
+          "Management (Nodes)"
+        ],
+        "summary": "Drain a node",
+        "description": "Set a node to draining status to prevent new sandbox placement",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Node ID"
+            },
+            "required": true,
+            "description": "Node ID",
+            "name": "nodeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Node draining",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "node_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "node_id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mgmt/nodes/{nodeId}/undrain": {
+      "post": {
+        "tags": [
+          "Management (Nodes)"
+        ],
+        "summary": "Undrain a node",
+        "description": "Restore a draining node to healthy status",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Node ID"
+            },
+            "required": true,
+            "description": "Node ID",
+            "name": "nodeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Node healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "node_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "node_id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mgmt/nodes/{nodeId}/cordon": {
+      "post": {
+        "tags": [
+          "Management (Nodes)"
+        ],
+        "summary": "Cordon a node",
+        "description": "Mark a node as cordoned",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Node ID"
+            },
+            "required": true,
+            "description": "Node ID",
+            "name": "nodeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Node cordoned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "node_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "node_id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mgmt/fleet/status": {
+      "get": {
+        "tags": [
+          "Management (Fleet)"
+        ],
+        "summary": "Get fleet status",
+        "description": "Get aggregated fleet status including node counts and resource utilization",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fleet status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "node_count": {
+                      "type": "number"
+                    },
+                    "healthy_nodes": {
+                      "type": "number"
+                    },
+                    "total_vcpu": {
+                      "type": "number"
+                    },
+                    "used_vcpu": {
+                      "type": "number"
+                    },
+                    "total_memory_mb": {
+                      "type": "number"
+                    },
+                    "used_memory_mb": {
+                      "type": "number"
+                    },
+                    "total_sandboxes": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "node_count",
+                    "healthy_nodes",
+                    "total_vcpu",
+                    "used_vcpu",
+                    "total_memory_mb",
+                    "used_memory_mb",
+                    "total_sandboxes"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mgmt/fleet/scheduler-config": {
+      "get": {
+        "tags": [
+          "Management (Fleet)"
+        ],
+        "summary": "Get scheduler configuration",
+        "description": "Get the current scheduler strategy configuration",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scheduler configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "strategy": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "strategy"
+                  ],
+                  "additionalProperties": {
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Management (Fleet)"
+        ],
+        "summary": "Update scheduler configuration",
+        "description": "Update the scheduler strategy configuration",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "strategy": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": {
+                  "nullable": true
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated scheduler configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "strategy": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "strategy"
+                  ],
+                  "additionalProperties": {
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mgmt/tenants": {
+      "post": {
+        "tags": [
+          "Management (Tenants)"
+        ],
+        "summary": "Create a tenant",
+        "description": "Create a new tenant with an initial API key",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Tenant name",
+                    "example": "acme-corp"
+                  },
+                  "max_concurrent_sandboxes": {
+                    "type": "number",
+                    "description": "Max concurrent sandboxes"
+                  },
+                  "max_vcpu": {
+                    "type": "number",
+                    "description": "Max vCPU allocation"
+                  },
+                  "max_memory_mb": {
+                    "type": "number",
+                    "description": "Max memory in MB"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Tenant created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tenant_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "api_key": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "tenant_id",
+                    "name",
+                    "api_key"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Management (Tenants)"
+        ],
+        "summary": "List tenants",
+        "description": "List all tenants",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of tenants",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tenants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tenant_id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "max_concurrent_sandboxes": {
+                            "type": "number"
+                          },
+                          "max_vcpu": {
+                            "type": "number"
+                          },
+                          "max_memory_mb": {
+                            "type": "number"
+                          },
+                          "created_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "tenant_id",
+                          "name",
+                          "status",
+                          "max_concurrent_sandboxes",
+                          "max_vcpu",
+                          "max_memory_mb",
+                          "created_at"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "tenants"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mgmt/tenants/{tenantId}": {
+      "get": {
+        "tags": [
+          "Management (Tenants)"
+        ],
+        "summary": "Get tenant details",
+        "description": "Get details for a specific tenant including quota usage",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant ID"
+            },
+            "required": true,
+            "description": "Tenant ID",
+            "name": "tenantId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tenant details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tenant_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "max_concurrent_sandboxes": {
+                      "type": "number"
+                    },
+                    "max_vcpu": {
+                      "type": "number"
+                    },
+                    "max_memory_mb": {
+                      "type": "number"
+                    },
+                    "usage": {
+                      "nullable": true
+                    },
+                    "created_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "tenant_id",
+                    "name",
+                    "status",
+                    "max_concurrent_sandboxes",
+                    "max_vcpu",
+                    "max_memory_mb",
+                    "created_at"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tenant not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Management (Tenants)"
+        ],
+        "summary": "Update a tenant",
+        "description": "Update tenant configuration and quota limits",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant ID"
+            },
+            "required": true,
+            "description": "Tenant ID",
+            "name": "tenantId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Tenant name"
+                  },
+                  "status": {
+                    "type": "string",
+                    "description": "Tenant status"
+                  },
+                  "max_concurrent_sandboxes": {
+                    "type": "number",
+                    "description": "Max concurrent sandboxes"
+                  },
+                  "max_vcpu": {
+                    "type": "number",
+                    "description": "Max vCPU allocation"
+                  },
+                  "max_memory_mb": {
+                    "type": "number",
+                    "description": "Max memory in MB"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tenant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Management (Tenants)"
+        ],
+        "summary": "Suspend a tenant",
+        "description": "Suspend a tenant (soft delete)",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant ID"
+            },
+            "required": true,
+            "description": "Tenant ID",
+            "name": "tenantId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Tenant suspended"
+          }
+        }
+      }
+    },
+    "/v1/mgmt/tenants/{tenantId}/api-keys": {
+      "post": {
+        "tags": [
+          "Management (Tenants)"
+        ],
+        "summary": "Create an API key",
+        "description": "Create a new API key for a tenant",
+        "security": [
+          {
+            "OperatorApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant ID"
+            },
+            "required": true,
+            "description": "Tenant ID",
+            "name": "tenantId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "API key name",
+                    "example": "production-key"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "API key created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key_id": {
+                      "type": "string"
+                    },
+                    "api_key": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key_id",
+                    "api_key"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/obs/events": {
+      "get": {
+        "tags": [
+          "Observability"
+        ],
+        "summary": "List events",
+        "description": "List audit events for the authenticated tenant",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Maximum number of events to return",
+              "example": "50"
+            },
+            "required": false,
+            "description": "Maximum number of events to return",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event_id": {
+                            "type": "string"
+                          },
+                          "action": {
+                            "type": "string"
+                          },
+                          "resource_type": {
+                            "type": "string"
+                          },
+                          "resource_id": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "request_id": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "timestamp": {
+                            "type": "string"
+                          },
+                          "details": {
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "event_id",
+                          "action",
+                          "resource_type",
+                          "resource_id",
+                          "request_id",
+                          "timestamp"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "events"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/obs/billing/usage": {
+      "get": {
+        "tags": [
+          "Observability"
+        ],
+        "summary": "Get billing usage",
+        "description": "Get aggregated billing usage for the authenticated tenant",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Billing usage summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tenant_id": {
+                      "type": "string"
+                    },
+                    "total_vcpu_seconds": {
+                      "type": "number"
+                    },
+                    "total_memory_gb_seconds": {
+                      "type": "number"
+                    },
+                    "total_cost_usd": {
+                      "type": "number"
+                    },
+                    "records_count": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "tenant_id",
+                    "total_vcpu_seconds",
+                    "total_memory_gb_seconds",
+                    "total_cost_usd",
+                    "records_count"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/obs/billing/invoices": {
+      "get": {
+        "tags": [
+          "Observability"
+        ],
+        "summary": "Get billing invoices",
+        "description": "Get billing invoice records for the authenticated tenant",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Billing invoices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "invoices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "sandbox_id": {
+                            "type": "string"
+                          },
+                          "vcpu_seconds": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "memory_gb_seconds": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "cost_usd": {
+                            "type": "number"
+                          },
+                          "period_start": {
+                            "type": "string"
+                          },
+                          "period_end": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "sandbox_id",
+                          "vcpu_seconds",
+                          "memory_gb_seconds",
+                          "cost_usd",
+                          "period_start",
+                          "period_end"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "invoices"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/obs/audit": {
+      "get": {
+        "tags": [
+          "Observability"
+        ],
+        "summary": "List audit logs",
+        "description": "List audit logs for the authenticated tenant",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Maximum number of audit logs to return",
+              "example": "100"
+            },
+            "required": false,
+            "description": "Maximum number of audit logs to return",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of audit logs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "audit_logs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "action": {
+                            "type": "string"
+                          },
+                          "resource_type": {
+                            "type": "string"
+                          },
+                          "resource_id": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "request_id": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "timestamp": {
+                            "type": "string"
+                          },
+                          "details": {
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "action",
+                          "resource_type",
+                          "resource_id",
+                          "request_id",
+                          "timestamp"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "audit_logs"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/obs/fleet/metrics": {
+      "get": {
+        "tags": [
+          "Observability"
+        ],
+        "summary": "Get fleet metrics",
+        "description": "Get fleet-wide metrics including node counts and vCPU utilization",
+        "security": [
+          {
+            "TenantApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fleet metrics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "fleet": {
+                      "type": "object",
+                      "properties": {
+                        "node_count": {
+                          "type": "number"
+                        },
+                        "vcpu_utilization": {
+                          "type": "number"
+                        },
+                        "nodes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "node_id": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "sandbox_count": {
+                                "type": "number"
+                              },
+                              "vcpu_utilization": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "node_id",
+                              "status",
+                              "sandbox_count",
+                              "vcpu_utilization"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "node_count",
+                        "vcpu_utilization",
+                        "nodes"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "fleet"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

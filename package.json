@@ -1,5 +1,8 @@
 {
   "name": "crack402",
   "private": true,
-  "workspaces": ["control-plane"]
+  "workspaces": ["control-plane", "dashboard", "docs"],
+  "scripts": {
+    "docs:generate": "cd control-plane && bun run docs:openapi && cd ../docs && bun run docs:generate"
+  }
 }

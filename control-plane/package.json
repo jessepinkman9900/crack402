@@ -8,24 +8,36 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply platform-api --local",
     "db:migrate:prod": "wrangler d1 migrations apply platform-api",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "test": "vitest run && vitest run --config vitest.e2e.config.ts",
+    "test:unit": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:dst": "tsx test/dst/run-dst.ts",
+    "docs:openapi": "tsx scripts/export-openapi.ts"
   },
   "dependencies": {
     "@aws-sdk/client-ec2": "^3.1000.0",
     "@aws-sdk/client-pricing": "^3.1000.0",
     "@aws-sdk/credential-providers": "^3.1000.0",
     "@better-auth/api-key": "^1.5.0",
+    "@hono/zod-openapi": "^1.2.2",
     "@libsql/client": "^0.17.0",
     "@xmldom/xmldom": "^0.8.11",
     "better-auth": "^1.5.0",
     "drizzle-orm": "^0.45.1",
     "hono": "^4.7.0",
-    "nanoid": "^5.1.6"
+    "nanoid": "^5.1.6",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.19",
     "@cloudflare/workers-types": "^4.20250214.0",
+    "@vitest/runner": "3.2",
+    "@vitest/snapshot": "3.2",
     "drizzle-kit": "^0.31.9",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.0",
+    "vitest": "3.2",
     "wrangler": "^4.14.0"
   }
 }
