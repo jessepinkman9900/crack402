@@ -6,6 +6,7 @@ import { createDb } from "../../db";
 import { sandboxes } from "../../db/schema";
 import { generateSandboxId } from "../../lib/id";
 import { eq, and } from "drizzle-orm";
+import { writeSandboxLifecyclePoint } from "../../lib/analytics";
 
 const app = new OpenAPIHono<Env>();
 
@@ -88,14 +89,14 @@ app.openapi(createSandboxRoute, async (c) => {
   }
   const { nodeId, region } = (await placeRes.json()) as { nodeId: string; region: string };
 
-  // 3. Allocate resources on scheduler
+  // 3. Allocate resources on scheduler with sandbox timeout as the reservation TTL
+  const sandboxId = generateSandboxId();
   await schedulerStub.fetch("http://do/allocate", {
     method: "POST",
-    body: JSON.stringify({ nodeId, vcpu: req.vcpu, memoryMb: req.memory_mb }),
+    body: JSON.stringify({ sandboxId, nodeId, vcpu: req.vcpu, memoryMb: req.memory_mb, timeoutMs: req.timeout_seconds * 1000 }),
   });
 
   // 4. Create SandboxTrackerDO
-  const sandboxId = generateSandboxId();
   const trackerId = c.env.SANDBOX_TRACKER.idFromName(sandboxId);
   const trackerStub = c.env.SANDBOX_TRACKER.get(trackerId);
   await trackerStub.fetch("http://do/init", {
@@ -159,6 +160,22 @@ app.openapi(createSandboxRoute, async (c) => {
     region,
     createdAt: now,
     expiresAt: now + req.timeout_seconds * 1000,
+  });
+
+  // Write lifecycle data point (fire-and-forget)
+  writeSandboxLifecyclePoint(c.env.AE_SANDBOX_LIFECYCLE, {
+    tenantId,
+    sandboxId,
+    fromStatus: "",
+    toStatus: "provisioning",
+    event: "create",
+    baseImage: req.base_image,
+    nodeId,
+    region,
+    networkPolicy: req.network_policy ?? "outbound-only",
+    vcpu: req.vcpu,
+    memoryMb: req.memory_mb,
+    durationMs: 0,
   });
 
   c.header("Location", `/v1/sandboxes/${sandboxId}`);
@@ -357,11 +374,43 @@ app.openapi(deleteSandboxRoute, async (c) => {
     return c.json(apiError("sandbox_state_conflict", err.error), 409);
   }
 
+  // Release scheduler reservation by sandboxId
+  const schedulerId = c.env.GLOBAL_SCHEDULER.idFromName("global");
+  const schedulerStub = c.env.GLOBAL_SCHEDULER.get(schedulerId);
+  await schedulerStub.fetch("http://do/release", {
+    method: "POST",
+    body: JSON.stringify({ sandboxId }),
+  });
+
+  // Cancel any pending commands for this sandbox (e.g. create_sandbox not yet picked up)
+  if (sandbox.nodeId) {
+    const nodeManagerId = c.env.NODE_MANAGER.idFromName(sandbox.nodeId);
+    const nodeManagerStub = c.env.NODE_MANAGER.get(nodeManagerId);
+    await nodeManagerStub.fetch(`http://do/cancel-sandbox/${sandboxId}`, { method: "POST" });
+  }
+
   // Update D1
+  const destroyedAt = Date.now();
   await db
     .update(sandboxes)
-    .set({ status: "destroyed", destroyedAt: Date.now() })
+    .set({ status: "destroyed", destroyedAt })
     .where(eq(sandboxes.id, sandboxId));
+
+  // Write lifecycle data point (fire-and-forget)
+  writeSandboxLifecyclePoint(c.env.AE_SANDBOX_LIFECYCLE, {
+    tenantId,
+    sandboxId,
+    fromStatus: sandbox.status,
+    toStatus: "destroyed",
+    event: "destroy",
+    baseImage: sandbox.baseImage,
+    nodeId: sandbox.nodeId ?? "",
+    region: sandbox.region ?? "",
+    networkPolicy: sandbox.networkPolicy,
+    vcpu: sandbox.vcpu,
+    memoryMb: sandbox.memoryMb,
+    durationMs: destroyedAt - sandbox.createdAt,
+  });
 
   return c.body(null, 204);
 });

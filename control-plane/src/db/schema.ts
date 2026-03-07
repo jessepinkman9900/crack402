@@ -197,7 +197,7 @@ export const nodes = sqliteTable(
   {
     id: text("id").primaryKey(),
     status: text("status", {
-      enum: ["healthy", "degraded", "draining", "cordoned", "offline"],
+      enum: ["pending", "healthy", "degraded", "draining", "cordoned", "offline"],
     }).notNull().default("healthy"),
     region: text("region").notNull(),
     totalVcpu: integer("total_vcpu").notNull(),
@@ -213,34 +213,6 @@ export const nodes = sqliteTable(
   })
 );
 
-export const tenants = sqliteTable(
-  "tenants",
-  {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    maxConcurrentSandboxes: integer("max_concurrent_sandboxes").notNull().default(10),
-    maxVcpu: integer("max_vcpu").notNull().default(64),
-    maxMemoryMb: integer("max_memory_mb").notNull().default(131072),
-    status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
-    createdAt: integer("created_at").notNull(),
-  }
-);
-
-export const tenantApiKeys = sqliteTable(
-  "tenant_api_keys",
-  {
-    id: text("id").primaryKey(),
-    tenantId: text("tenant_id").notNull(),
-    keyHash: text("key_hash").notNull(),
-    name: text("name"),
-    lastUsedAt: integer("last_used_at"),
-    createdAt: integer("created_at").notNull(),
-    expiresAt: integer("expires_at"),
-  },
-  (table) => ({
-    tenantIdIdx: index("idx_tenant_api_keys_tenant_id").on(table.tenantId),
-  })
-);
 
 export const billingRecords = sqliteTable(
   "billing_records",
@@ -312,8 +284,6 @@ export type SnapshotRecord = typeof snapshots.$inferSelect;
 export type NewSnapshotRecord = typeof snapshots.$inferInsert;
 export type NodeRecord = typeof nodes.$inferSelect;
 export type NewNodeRecord = typeof nodes.$inferInsert;
-export type TenantRecord = typeof tenants.$inferSelect;
-export type NewTenantRecord = typeof tenants.$inferInsert;
 export type BillingRecord = typeof billingRecords.$inferSelect;
 export type AuditLogRecord = typeof auditLogs.$inferSelect;
 export type WebhookRegistrationRecord = typeof webhookRegistrations.$inferSelect;

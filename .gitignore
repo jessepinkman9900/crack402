@@ -28,3 +28,6 @@ node_modules
 
 # cargo
 target/
+
+# Claude Code ctags index
+.claude/tags

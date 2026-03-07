@@ -1,8 +1,15 @@
-import { env } from "cloudflare:test";
+import { SELF, env } from "cloudflare:test";
 
-export async function applyMigrations() {
-  const db = env.DB;
+/**
+ * Apply all schema migrations needed for auth e2e tests.
+ * This mirrors test/e2e/setup.ts but includes:
+ *   - user_id column on tenants (migration 0004)
+ *   - better-auth tables (user, session, apikey, etc.) via first-request migration
+ */
+export async function applyAuthMigrations() {
+  const db = (env as any).DB as D1Database;
 
+  // Core sandbox tables
   await db.exec(`CREATE TABLE IF NOT EXISTS "sandboxes" ("id" text PRIMARY KEY NOT NULL, "tenant_id" text NOT NULL, "node_id" text, "status" text NOT NULL DEFAULT 'provisioning', "base_image" text NOT NULL, "vcpu" integer NOT NULL DEFAULT 2, "memory_mb" integer NOT NULL DEFAULT 2048, "gpu" text, "timeout_seconds" integer NOT NULL DEFAULT 3600, "idle_timeout_seconds" integer NOT NULL DEFAULT 600, "auto_pause_on_idle" integer NOT NULL DEFAULT 0, "auto_destroy" integer NOT NULL DEFAULT 1, "network_policy" text NOT NULL DEFAULT 'outbound-only', "env_vars" text, "metadata" text, "region" text, "isolation_backend" text, "cost_accrued_usd" integer DEFAULT 0, "created_at" integer NOT NULL, "started_at" integer, "expires_at" integer, "destroyed_at" integer);`);
   await db.exec(`CREATE INDEX IF NOT EXISTS "idx_sandboxes_tenant_id" ON "sandboxes" ("tenant_id");`);
   await db.exec(`CREATE INDEX IF NOT EXISTS "idx_sandboxes_status" ON "sandboxes" ("status");`);
@@ -19,6 +26,7 @@ export async function applyMigrations() {
   await db.exec(`CREATE TABLE IF NOT EXISTS "nodes" ("id" text PRIMARY KEY NOT NULL, "status" text NOT NULL DEFAULT 'healthy', "region" text NOT NULL, "total_vcpu" integer NOT NULL, "total_memory_mb" integer NOT NULL, "firecracker_version" text, "bootstrap_token" text, "metadata" text, "last_heartbeat_at" integer, "created_at" integer NOT NULL);`);
   await db.exec(`CREATE INDEX IF NOT EXISTS "idx_nodes_status" ON "nodes" ("status");`);
 
+  // Tenants — includes user_id (migration 0004)
   await db.exec(`CREATE TABLE IF NOT EXISTS "tenants" ("id" text PRIMARY KEY NOT NULL, "user_id" text, "name" text NOT NULL, "max_concurrent_sandboxes" integer NOT NULL DEFAULT 10, "max_vcpu" integer NOT NULL DEFAULT 64, "max_memory_mb" integer NOT NULL DEFAULT 131072, "status" text NOT NULL DEFAULT 'active', "created_at" integer NOT NULL);`);
   await db.exec(`CREATE INDEX IF NOT EXISTS "idx_tenants_user_id" ON "tenants" ("user_id");`);
 
@@ -35,4 +43,7 @@ export async function applyMigrations() {
 
   await db.exec(`CREATE TABLE IF NOT EXISTS "webhook_registrations" ("id" text PRIMARY KEY NOT NULL, "tenant_id" text NOT NULL, "url" text NOT NULL, "events" text NOT NULL, "secret" text, "created_at" integer NOT NULL);`);
   await db.exec(`CREATE INDEX IF NOT EXISTS "idx_webhook_registrations_tenant_id" ON "webhook_registrations" ("tenant_id");`);
+
+  // Trigger better-auth migrations (creates user, session, apikey, wallet_address tables)
+  await SELF.fetch("http://localhost/healthz");
 }

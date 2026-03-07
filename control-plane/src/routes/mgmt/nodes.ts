@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Env } from "../../types";
-import { RegisterNodeSchema } from "../../schemas/node";
+import { RegisterNodeSchema, IssueRegistrationTokenResponseSchema } from "../../schemas/node";
 import { ErrorSchema, apiError } from "../../schemas/error";
 import { createDb } from "../../db";
 import { nodes } from "../../db/schema";
@@ -13,6 +13,21 @@ const app = new OpenAPIHono<Env>();
 
 const nodeIdParam = z.object({
   nodeId: z.string().openapi({ param: { name: "nodeId", in: "path" }, description: "Node ID" }),
+});
+
+const issueRegistrationTokenRoute = createRoute({
+  method: "post",
+  path: "/registration-token",
+  tags: ["Management (Nodes)"],
+  summary: "Issue a node registration token",
+  description: "Pre-register a node slot and return a short-lived registration token (10min). The node agent uses this token to self-register via PATCH /v1/internal/nodes/{nodeId}.",
+  security: [{ OperatorApiKey: [] }],
+  responses: {
+    201: {
+      description: "Registration token issued",
+      content: { "application/json": { schema: IssueRegistrationTokenResponseSchema } },
+    },
+  },
 });
 
 const registerNodeRoute = createRoute({
@@ -197,6 +212,32 @@ const cordonNodeRoute = createRoute({
 });
 
 // --- Handlers ---
+
+// POST /v1/mgmt/nodes/registration-token
+app.openapi(issueRegistrationTokenRoute, async (c) => {
+  const nodeId = generateNodeId();
+  const registrationToken = generateApiKeyToken();
+  const now = Date.now();
+  const expiresAt = new Date(now + 10 * 60 * 1000).toISOString();
+  const db = createDb(c.env.DB);
+
+  await db.insert(nodes).values({
+    id: nodeId,
+    status: "pending",
+    region: "unknown",
+    totalVcpu: 0,
+    totalMemoryMb: 0,
+    bootstrapToken: registrationToken,
+    createdAt: now,
+  });
+
+  await c.env.NODE_TOKENS.put(registrationToken, nodeId, { expirationTtl: 600 });
+
+  return c.json(
+    { node_id: nodeId, registration_token: registrationToken, expires_at: expiresAt },
+    201
+  );
+});
 
 // POST /v1/mgmt/nodes
 app.openapi(registerNodeRoute, async (c) => {

@@ -12,6 +12,7 @@
     "test": "vitest run && vitest run --config vitest.e2e.config.ts",
     "test:unit": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:auth": "vitest run --config vitest.auth.config.ts",
     "test:dst": "tsx test/dst/run-dst.ts",
     "docs:openapi": "tsx scripts/export-openapi.ts"
   },
@@ -27,6 +28,7 @@
     "drizzle-orm": "^0.45.1",
     "hono": "^4.7.0",
     "nanoid": "^5.1.6",
+    "viem": "^2.47.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

@@ -2,22 +2,13 @@ import "./_setup";
 import { z } from "zod/v4";
 
 export const NodeStatusSchema = z.enum([
-  "healthy", "degraded", "draining", "cordoned", "offline",
+  "pending", "healthy", "degraded", "draining", "cordoned", "offline",
 ]).openapi("NodeStatus");
 
 export type NodeStatus = z.infer<typeof NodeStatusSchema>;
 
 export const HeartbeatSchema = z.object({
-  node_id: z.string().openapi({ description: "Node identifier", example: "node_abc12345678901234567" }),
   timestamp: z.string().datetime().openapi({ description: "ISO 8601 heartbeat timestamp", example: "2026-01-15T12:00:00Z" }),
-  total_vcpu: z.number().openapi({ description: "Total vCPUs available on the node", example: 64 }),
-  used_vcpu: z.number().openapi({ description: "Currently used vCPUs", example: 12 }),
-  total_memory_mb: z.number().int().openapi({ description: "Total memory in MB", example: 262144 }),
-  used_memory_mb: z.number().int().openapi({ description: "Currently used memory in MB", example: 65536 }),
-  sandbox_count: z.number().int().openapi({ description: "Number of active sandboxes", example: 6 }),
-  sandbox_ids: z.array(z.string()).openapi({ description: "IDs of active sandboxes on this node" }),
-  firecracker_version: z.string().optional().openapi({ description: "Firecracker version", example: "1.7.0" }),
-  disk_free_gb: z.number().optional().openapi({ description: "Free disk space in GB", example: 450.5 }),
   status: NodeStatusSchema.openapi({ description: "Current node health status" }),
 }).openapi("Heartbeat");
 
@@ -78,3 +69,31 @@ export const RegisterNodeSchema = z.object({
 }).openapi("RegisterNodeRequest");
 
 export type RegisterNodeRequest = z.infer<typeof RegisterNodeSchema>;
+
+export const IssueRegistrationTokenResponseSchema = z.object({
+  node_id: z.string().openapi({ description: "Node identifier", example: "node_abc12345678901234567" }),
+  registration_token: z.string().openapi({ description: "Short-lived token for node self-registration (10min TTL)", example: "sk_abc12345678901234567" }),
+  expires_at: z.string().datetime().openapi({ description: "ISO 8601 expiry timestamp", example: "2026-01-15T12:10:00Z" }),
+}).openapi("IssueRegistrationTokenResponse");
+
+export const NodeSelfRegisterSchema = z.object({
+  registration_token: z.string().openapi({ description: "Registration token issued by POST /v1/mgmt/nodes/registration-token", example: "sk_hMMQGFzJBRwotokqg_B9" }),
+  vcpu: z.number().openapi({ description: "Total vCPUs available", example: 64 }),
+  memory_mb: z.number().int().openapi({ description: "Total memory in MB", example: 262144 }),
+  region: z.string().openapi({ description: "Node deployment region", example: "us-east-1" }),
+  firecracker_version: z.string().optional().openapi({ description: "Firecracker version", example: "1.7.0" }),
+  metadata: z.record(z.string(), z.string()).optional().openapi({ description: "Node metadata" }),
+}).openapi("NodeSelfRegisterRequest");
+
+export type NodeSelfRegisterRequest = z.infer<typeof NodeSelfRegisterSchema>;
+
+export const NodeSelfRegisterResponseSchema = z.object({
+  node_id: z.string().openapi({ description: "Node identifier", example: "node_abc12345678901234567" }),
+  token: z.string().openapi({ description: "Operational token (15min TTL)", example: "sk_abc12345678901234567" }),
+  expires_at: z.string().datetime().openapi({ description: "ISO 8601 expiry timestamp", example: "2026-01-15T12:15:00Z" }),
+}).openapi("NodeSelfRegisterResponse");
+
+export const TokenRefreshResponseSchema = z.object({
+  token: z.string().openapi({ description: "New operational token (15min TTL)", example: "sk_abc12345678901234567" }),
+  expires_at: z.string().datetime().openapi({ description: "ISO 8601 expiry timestamp", example: "2026-01-15T12:30:00Z" }),
+}).openapi("TokenRefreshResponse");

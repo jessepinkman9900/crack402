@@ -71,6 +71,12 @@ export class NodeManagerDO implements DurableObject {
       return c.json({ ok: true });
     });
 
+    app.post("/cancel-sandbox/:sandboxId", async (c) => {
+      const sandboxId = c.req.param("sandboxId");
+      await this.cancelBySandbox(sandboxId);
+      return c.json({ ok: true });
+    });
+
     app.get("/status", async (c) => {
       const status = await this.storage.get<string>("status");
       const lastHeartbeat = await this.storage.get<number>("lastHeartbeat");
@@ -91,25 +97,16 @@ export class NodeManagerDO implements DurableObject {
 
     if (lastHeartbeat && now - lastHeartbeat >= HEARTBEAT_TIMEOUT_MS) {
       await this.storage.put("status", "offline");
-      // Store sandbox IDs that were on this node for the caller to handle
-      const sandboxIds = await this.storage.get<string[]>("sandboxIds");
-      if (sandboxIds && sandboxIds.length > 0) {
-        await this.storage.put("offlineSandboxIds", sandboxIds);
-      }
     }
   }
 
   async handleHeartbeat(payload: {
-    sandbox_ids?: string[];
     status?: string;
     [key: string]: unknown;
   }): Promise<void> {
     const now = this.clock.now();
     await this.storage.put("lastHeartbeat", now);
     await this.storage.put("status", payload.status || "healthy");
-    if (payload.sandbox_ids) {
-      await this.storage.put("sandboxIds", payload.sandbox_ids);
-    }
     // Reset alarm for next heartbeat timeout
     await this.storage.setAlarm(now + HEARTBEAT_TIMEOUT_MS);
   }
@@ -144,6 +141,15 @@ export class NodeManagerDO implements DurableObject {
     if (cmd) {
       cmd.status = "acked";
       await this.storage.put(`cmd:${commandId}`, cmd);
+    }
+  }
+
+  async cancelBySandbox(sandboxId: string): Promise<void> {
+    const entries = await this.storage.list<StoredCommand>({ prefix: "cmd:" });
+    for (const [key, cmd] of entries) {
+      if (cmd.sandboxId === sandboxId && cmd.status === "pending") {
+        await this.storage.delete(key);
+      }
     }
   }
 

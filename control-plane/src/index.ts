@@ -11,14 +11,8 @@ import { runMigrations } from "./lib/migrate";
 import { createCorsMiddleware } from "./middleware/cors";
 import { authMiddleware, requireUser } from "./middleware/auth";
 
-import authRoutes from "./routes/auth";
 import usersRoutes from "./routes/users";
-import botsRoutes from "./routes/bots";
-import botVersionsRoutes from "./routes/bot-versions";
-import cloudRoutes from "./routes/cloud";
-import billingRoutes from "./routes/billing";
 import sshKeysRoutes from "./routes/ssh-keys";
-import testAwsRoutes from "./routes/test-aws";
 
 // Sandbox API imports
 import { requestIdMiddleware } from "./middleware/request-id";
@@ -32,7 +26,7 @@ import filesRoutes from "./routes/sandboxes/files";
 import snapshotsRoutes from "./routes/sandboxes/snapshots";
 import portsRoutes from "./routes/sandboxes/ports";
 import webhooksRoutes from "./routes/sandboxes/webhooks";
-import nodeInternalRoutes from "./routes/nodes/internal";
+import nodeInternalRoutes, { nodeRegisterApp } from "./routes/nodes/internal";
 import mgmtNodesRoutes from "./routes/mgmt/nodes";
 import mgmtFleetRoutes from "./routes/mgmt/fleet";
 import mgmtTenantsRoutes from "./routes/mgmt/tenants";
@@ -40,9 +34,10 @@ import obsEventsRoutes from "./routes/obs/events";
 import obsBillingRoutes from "./routes/obs/billing";
 import obsAuditRoutes from "./routes/obs/audit";
 import obsMetricsRoutes from "./routes/obs/metrics";
+import obsSandboxMetricsRoutes from "./routes/obs/metrics-sandboxes";
+import obsExecMetricsRoutes from "./routes/obs/metrics-executions";
+import obsUsageMetricsRoutes from "./routes/obs/metrics-usage";
 
-// Export workflow for Cloudflare Workers
-export { BotProvisioningWorkflow } from "./workflows/bot-provisioning";
 
 // Export Durable Objects for Cloudflare Workers
 export { GlobalSchedulerDO } from "./durable-objects/global-scheduler";
@@ -130,18 +125,10 @@ app.on(["POST", "GET"], "/api/auth/*", (c) => {
   return auth.handler(c.req.raw);
 });
 
-// --- Public v1 routes (no auth) ---
-app.route("/v1/cloud", cloudRoutes);
-app.route("/v1/cloud", testAwsRoutes); // AWS test endpoints
-
 // --- Protected v1 routes (auth required) ---
 const protectedApi = new Hono<Env>();
 protectedApi.use("*", authMiddleware);
-protectedApi.route("/auth", authRoutes);
 protectedApi.route("/users", usersRoutes);
-protectedApi.route("/bots", botsRoutes);
-protectedApi.route("/bot-versions", botVersionsRoutes);
-protectedApi.route("/billing", billingRoutes);
 protectedApi.route("/ssh-keys", sshKeysRoutes);
 
 app.route("/v1", protectedApi);
@@ -172,6 +159,9 @@ webhookApi.use("*", sandboxAuthMiddleware);
 webhookApi.route("/", webhooksRoutes);
 app.route("/v1/webhooks", webhookApi);
 
+// Node self-registration (no auth — token validated from request body)
+app.route("/v1/internal/nodes", nodeRegisterApp);
+
 // Node API (node auth)
 const nodeApi = new OpenAPIHono<Env>();
 nodeApi.use("*", nodeAuthMiddleware);
@@ -193,6 +183,9 @@ obsApi.route("/events", obsEventsRoutes);
 obsApi.route("/billing", obsBillingRoutes);
 obsApi.route("/audit", obsAuditRoutes);
 obsApi.route("/fleet/metrics", obsMetricsRoutes);
+obsApi.route("/metrics/sandboxes", obsSandboxMetricsRoutes);
+obsApi.route("/metrics/executions", obsExecMetricsRoutes);
+obsApi.route("/metrics/usage", obsUsageMetricsRoutes);
 app.route("/v1/obs", obsApi);
 
 // --- OpenAPI spec endpoint ---
@@ -207,7 +200,7 @@ app.doc("/openapi.json", {
   security: [],
   "x-tagGroups": [
     { name: "Sandboxes", tags: ["Sandboxes", "Webhooks"] },
-    { name: "Management", tags: ["Management (Nodes)", "Management (Fleet)", "Management (Tenants)"] },
+    { name: "Management", tags: ["Management (Nodes)", "Management (Fleet)", "Management (Tenants)"] }, // "Tenants" tag maps to the org-backed mgmt routes
     { name: "Observability", tags: ["Observability"] },
     { name: "Internal", tags: ["Internal (Node)"] },
   ],
@@ -231,6 +224,18 @@ app.openAPIRegistry.registerComponent("securitySchemes", "OperatorApiKey", {
   in: "header",
   name: "X-Operator-Key",
   description: "Operator API key for management operations",
+});
+app.openAPIRegistry.registerComponent("securitySchemes", "SiweSession", {
+  type: "apiKey",
+  in: "cookie",
+  name: "better-auth.session_token",
+  description: "Session obtained via SIWE (Sign-In with Ethereum). Call POST /api/auth/siwe/nonce then POST /api/auth/siwe/verify.",
+});
+app.openAPIRegistry.registerComponent("securitySchemes", "BetterAuthApiKey", {
+  type: "apiKey",
+  in: "header",
+  name: "X-API-Key",
+  description: "better-auth API key (mship_... prefix). Generate after signing in via GitHub or SIWE.",
 });
 
 // --- 404 fallback ---

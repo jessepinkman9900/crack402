@@ -77,7 +77,7 @@ describe("GlobalSchedulerDO", () => {
 
   it("allocateResources updates node capacity", async () => {
     await scheduler.updateNode(makeNode({ nodeId: "node_a" }));
-    await scheduler.allocateResources("node_a", 4, 4096);
+    await scheduler.allocateResources("sbx_test1", "node_a", 4, 4096, 3600000);
     const nodes = await scheduler.getAllNodes();
     const node = nodes.find((n) => n.nodeId === "node_a")!;
     expect(node.usedVcpu).toBe(4);
@@ -86,12 +86,25 @@ describe("GlobalSchedulerDO", () => {
   });
 
   it("releaseResources updates node capacity", async () => {
-    await scheduler.updateNode(makeNode({ nodeId: "node_a", usedVcpu: 4, usedMemoryMb: 4096, sandboxCount: 1 }));
-    await scheduler.releaseResources("node_a", 4, 4096);
+    await scheduler.updateNode(makeNode({ nodeId: "node_a" }));
+    await scheduler.allocateResources("sbx_test2", "node_a", 4, 4096, 3600000);
+    await scheduler.releaseResources("sbx_test2");
     const nodes = await scheduler.getAllNodes();
     const node = nodes.find((n) => n.nodeId === "node_a")!;
     expect(node.usedVcpu).toBe(0);
     expect(node.usedMemoryMb).toBe(0);
+    expect(node.sandboxCount).toBe(0);
+  });
+
+  it("alarm cleans up expired reservations", async () => {
+    await scheduler.updateNode(makeNode({ nodeId: "node_a" }));
+    await scheduler.allocateResources("sbx_expire", "node_a", 2, 2048, 1);
+    // Wait for reservation to expire (timeoutMs=1)
+    await new Promise((r) => setTimeout(r, 10));
+    await scheduler.alarm();
+    const nodes = await scheduler.getAllNodes();
+    const node = nodes.find((n) => n.nodeId === "node_a")!;
+    expect(node.usedVcpu).toBe(0);
     expect(node.sandboxCount).toBe(0);
   });
 

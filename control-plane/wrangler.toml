@@ -9,12 +9,6 @@ database_name = "platform-api"
 database_id = "local"
 migrations_dir = "drizzle"
 
-# [[workflows]]
-# name = "bot-provisioning-workflow"
-# binding = "BOT_PROVISIONING_WORKFLOW"
-# class_name = "BotProvisioningWorkflow"
-# script_name = "crack401-control-plan-api"
-
 # Durable Objects
 [[durable_objects.bindings]]
 name = "GLOBAL_SCHEDULER"
@@ -50,46 +44,20 @@ id = "placeholder-tenant-keys"
 binding = "NODE_TOKENS"
 id = "placeholder-node-tokens"
 
+# Analytics Engine
+[[analytics_engine_datasets]]
+binding = "AE_SANDBOX_LIFECYCLE"
+dataset = "sandbox_lifecycle"
+
+[[analytics_engine_datasets]]
+binding = "AE_EXEC_RESULTS"
+dataset = "exec_results"
+
+[[analytics_engine_datasets]]
+binding = "AE_BILLING_USAGE"
+dataset = "billing_usage"
+
 [vars]
 MOCK_EXTERNAL_SERVICES = "true"
 FRONTEND_URL = "http://localhost:3000"
 DISABLE_AUTH = "true"
-
-# Cloud Provider Configuration
-# This JSON defines cloud provider defaults and fallback configurations
-CLOUD_CONFIG = '''
-{
-  "aws": {
-    "defaultRegion": "us-east-1",
-    "defaultInstanceType": "t4g.nano",
-    "defaultAmi": "ami-03561af9da946adfb",
-    "regions": [
-      "us-east-1"
-    ]
-  }
-}
-'''
-
-# Supported Zeroclaw Bot Versions
-SUPPORTED_BOT_VERSIONS = '''
-[
-  {
-    "version": "v0.1.7",
-    "label": "v0.1.7 (Stable)",
-    "isDefault": true,
-    "description": "Latest stable release"
-  },
-  {
-    "version": "v0.1.6",
-    "label": "v0.1.6",
-    "isDefault": false,
-    "description": ""
-  },
-  {
-    "version": "v0.1.5",
-    "label": "v0.1.5",
-    "isDefault": false,
-    "description": ""
-  }
-]
-'''

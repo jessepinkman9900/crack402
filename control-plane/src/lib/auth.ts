@@ -1,5 +1,7 @@
 import { betterAuth } from "better-auth";
+import { admin, organization, siwe } from "better-auth/plugins";
 import { apiKey } from "@better-auth/api-key";
+import { recoverMessageAddress } from "viem";
 import type { Bindings } from "../types";
 
 /**
@@ -19,9 +21,19 @@ export function createAuth(env: Bindings) {
       github: {
         clientId: env.GITHUB_CLIENT_ID,
         clientSecret: env.GITHUB_CLIENT_SECRET,
+        mapProfileToUser: async (profile: any) => {
+          const adminLogins = env.ADMIN_GITHUB_USERNAMES
+            ?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
+          if (adminLogins.length > 0 && adminLogins.includes(profile.login)) {
+            return { role: "admin" };
+          }
+          return {};
+        },
       },
     },
     plugins: [
+      admin({ defaultRole: "user" }),
+      organization(),
       apiKey({
         defaultPrefix: "mship_",
         rateLimit: {
@@ -30,6 +42,25 @@ export function createAuth(env: Bindings) {
           timeWindow: 60_000, // 100 requests per minute
         },
         enableSessionForAPIKeys: true,
+      }),
+      siwe({
+        domain: new URL(env.FRONTEND_URL).hostname,
+        getNonce: async () => {
+          const bytes = new Uint8Array(32);
+          crypto.getRandomValues(bytes);
+          return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+        },
+        verifyMessage: async ({ message, signature, address }) => {
+          try {
+            const recovered = await recoverMessageAddress({
+              message,
+              signature: signature as `0x${string}`,
+            });
+            return recovered.toLowerCase() === address.toLowerCase();
+          } catch {
+            return false;
+          }
+        },
       }),
     ],
   });

@@ -22,19 +22,12 @@ export interface CloudConfig {
  */
 export interface BaseBindings {
   DB: D1Database;
-  BOT_PROVISIONING_WORKFLOW: Workflow;
   MOCK_EXTERNAL_SERVICES: string;
   DISABLE_AUTH?: string;
   FRONTEND_URL: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   BETTER_AUTH_SECRET: string;
-  WORKFLOW_SECRET: string;
-  OPENROUTER_MANGEMENT_API_KEY: string;
-  OPENROUTER_WEBHOOK_SECRET: string;
-  CLOUD_PROVIDER: CloudProvider;
-  CLOUD_CONFIG: string; // JSON string of CloudConfig
-  SERVER_TYPE?: string; // Optional, defaults to provider-specific default
 
   // Sandbox API — Durable Objects
   GLOBAL_SCHEDULER: DurableObjectNamespace;
@@ -54,6 +47,18 @@ export interface BaseBindings {
   PAYMENT_NETWORK?: string;
   PAYMENT_ASSET?: string;
   OPERATOR_API_KEY?: string;
+
+  // Seeded admins — comma-separated GitHub logins promoted to admin on every OAuth login
+  ADMIN_GITHUB_USERNAMES?: string;
+
+  // Analytics Engine datasets
+  AE_SANDBOX_LIFECYCLE: AnalyticsEngineDataset;
+  AE_EXEC_RESULTS: AnalyticsEngineDataset;
+  AE_BILLING_USAGE: AnalyticsEngineDataset;
+
+  // Analytics Engine query credentials
+  CF_ACCOUNT_ID: string;
+  CF_AE_API_TOKEN: string;
 }
 
 /**
@@ -85,6 +90,7 @@ export type Variables = {
     name: string;
     email: string;
     image: string | null;
+    role: string | null;
   } | null;
   session: {
     id: string;

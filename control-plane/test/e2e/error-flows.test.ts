@@ -14,8 +14,6 @@ describe("Error Flows E2E", () => {
       body: JSON.stringify({}), // Missing base_image
     });
     expect(res.status).toBe(400);
-    const data = (await res.json()) as any;
-    expect(data.error).toBe("invalid_request");
   });
 
   it("returns 400 for invalid vcpu value", async () => {

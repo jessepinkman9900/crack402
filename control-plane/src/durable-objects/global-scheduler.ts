@@ -15,6 +15,13 @@ export interface NodeCapacity {
   lastHeartbeat: number;
 }
 
+export interface Reservation {
+  nodeId: string;
+  vcpu: number;
+  memoryMb: number;
+  expiresAt: number;
+}
+
 export interface PlacementRequest {
   vcpu: number;
   memoryMb: number;
@@ -71,22 +78,20 @@ export class GlobalSchedulerDO implements DurableObject {
     });
 
     app.post("/allocate", async (c) => {
-      const { nodeId, vcpu, memoryMb } = (await c.req.json()) as {
+      const { sandboxId, nodeId, vcpu, memoryMb, timeoutMs } = (await c.req.json()) as {
+        sandboxId: string;
         nodeId: string;
         vcpu: number;
         memoryMb: number;
+        timeoutMs: number;
       };
-      await this.allocateResources(nodeId, vcpu, memoryMb);
+      await this.allocateResources(sandboxId, nodeId, vcpu, memoryMb, timeoutMs);
       return c.json({ ok: true });
     });
 
     app.post("/release", async (c) => {
-      const { nodeId, vcpu, memoryMb } = (await c.req.json()) as {
-        nodeId: string;
-        vcpu: number;
-        memoryMb: number;
-      };
-      await this.releaseResources(nodeId, vcpu, memoryMb);
+      const { sandboxId } = (await c.req.json()) as { sandboxId: string };
+      await this.releaseResources(sandboxId);
       return c.json({ ok: true });
     });
 
@@ -166,6 +171,13 @@ export class GlobalSchedulerDO implements DurableObject {
   }
 
   async updateNode(node: NodeCapacity): Promise<void> {
+    // Preserve scheduler-tracked usage — heartbeats only update capacity metadata
+    const existing = await this.storage.get<NodeCapacity>(`node:${node.nodeId}`);
+    if (existing) {
+      node.usedVcpu = existing.usedVcpu;
+      node.usedMemoryMb = existing.usedMemoryMb;
+      node.sandboxCount = existing.sandboxCount;
+    }
     await this.storage.put(`node:${node.nodeId}`, node);
   }
 
@@ -173,22 +185,61 @@ export class GlobalSchedulerDO implements DurableObject {
     await this.storage.delete(`node:${nodeId}`);
   }
 
-  async allocateResources(nodeId: string, vcpu: number, memoryMb: number): Promise<void> {
+  async allocateResources(sandboxId: string, nodeId: string, vcpu: number, memoryMb: number, timeoutMs: number): Promise<void> {
+    const expiresAt = this.clock.now() + timeoutMs;
+
+    // Store reservation keyed by sandboxId
+    const reservation: Reservation = { nodeId, vcpu, memoryMb, expiresAt };
+    await this.storage.put(`reservation:${sandboxId}`, reservation);
+
+    // Increment node counters
     const node = await this.storage.get<NodeCapacity>(`node:${nodeId}`);
-    if (!node) return;
-    node.usedVcpu += vcpu;
-    node.usedMemoryMb += memoryMb;
-    node.sandboxCount += 1;
-    await this.storage.put(`node:${nodeId}`, node);
+    if (node) {
+      node.usedVcpu += vcpu;
+      node.usedMemoryMb += memoryMb;
+      node.sandboxCount += 1;
+      await this.storage.put(`node:${nodeId}`, node);
+    }
+
+    // Ensure alarm fires no later than this reservation's expiry
+    const currentAlarm = await this.storage.getAlarm();
+    if (currentAlarm === null || expiresAt < currentAlarm) {
+      await this.storage.setAlarm(expiresAt);
+    }
   }
 
-  async releaseResources(nodeId: string, vcpu: number, memoryMb: number): Promise<void> {
-    const node = await this.storage.get<NodeCapacity>(`node:${nodeId}`);
-    if (!node) return;
-    node.usedVcpu = Math.max(0, node.usedVcpu - vcpu);
-    node.usedMemoryMb = Math.max(0, node.usedMemoryMb - memoryMb);
-    node.sandboxCount = Math.max(0, node.sandboxCount - 1);
-    await this.storage.put(`node:${nodeId}`, node);
+  async releaseResources(sandboxId: string): Promise<void> {
+    const reservation = await this.storage.get<Reservation>(`reservation:${sandboxId}`);
+    if (!reservation) return;
+
+    await this.storage.delete(`reservation:${sandboxId}`);
+
+    const node = await this.storage.get<NodeCapacity>(`node:${reservation.nodeId}`);
+    if (node) {
+      node.usedVcpu = Math.max(0, node.usedVcpu - reservation.vcpu);
+      node.usedMemoryMb = Math.max(0, node.usedMemoryMb - reservation.memoryMb);
+      node.sandboxCount = Math.max(0, node.sandboxCount - 1);
+      await this.storage.put(`node:${reservation.nodeId}`, node);
+    }
+  }
+
+  async alarm(): Promise<void> {
+    const now = this.clock.now();
+    const reservations = await this.storage.list<Reservation>({ prefix: "reservation:" });
+
+    let nextAlarm: number | null = null;
+    for (const [key, reservation] of reservations) {
+      if (reservation.expiresAt <= now) {
+        const sandboxId = key.slice("reservation:".length);
+        await this.releaseResources(sandboxId);
+      } else if (nextAlarm === null || reservation.expiresAt < nextAlarm) {
+        nextAlarm = reservation.expiresAt;
+      }
+    }
+
+    if (nextAlarm !== null) {
+      await this.storage.setAlarm(nextAlarm);
+    }
   }
 
   async getAllNodes(): Promise<NodeCapacity[]> {

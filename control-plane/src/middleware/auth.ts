@@ -52,6 +52,7 @@ export const authMiddleware = createMiddleware<Env>(async (c, next) => {
               name: session.user.name,
               email: session.user.email,
               image: session.user.image ?? null,
+              role: (session.user as any).role ?? null,
             });
             c.set("session", {
               id: session.session.id,
@@ -65,7 +66,7 @@ export const authMiddleware = createMiddleware<Env>(async (c, next) => {
           // If enableSessionForAPIKeys didn't produce a session,
           // we still know the user — fetch from DB directly
           const userRows = await c.env.DB.prepare(
-            "SELECT id, name, email, image FROM user WHERE id = ?"
+            "SELECT id, name, email, image, role FROM user WHERE id = ?"
           )
             .bind(userId)
             .all();
@@ -77,6 +78,7 @@ export const authMiddleware = createMiddleware<Env>(async (c, next) => {
               name: u.name ?? "",
               email: u.email ?? "",
               image: u.image ?? null,
+              role: u.role ?? null,
             });
             c.set("session", null);
             return next();
@@ -104,6 +106,7 @@ export const authMiddleware = createMiddleware<Env>(async (c, next) => {
           name: session.user.name,
           email: session.user.email,
           image: session.user.image ?? null,
+          role: (session.user as any).role ?? null,
         });
         c.set("session", {
           id: session.session.id,

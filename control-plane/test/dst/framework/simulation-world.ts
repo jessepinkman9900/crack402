@@ -241,11 +241,11 @@ export class SimulationWorld {
       return { error: "capacity_exhausted" };
     }
 
-    // Allocate resources
-    await this.scheduler.allocateResources(placement.nodeId, vcpu, memoryMb);
-
     // Create tracker
     const sandboxId = this.random.id("sbx_");
+
+    // Allocate resources
+    await this.scheduler.allocateResources(sandboxId, placement.nodeId, vcpu, memoryMb, 3600 * 1000);
     const storage = new DeterministicStorage(this.random);
     const tracker = new SandboxTrackerDO({} as any, {});
     tracker.initForTest(storage, this.clock);
@@ -320,7 +320,7 @@ export class SimulationWorld {
             } catch { /* fault injection */ }
           }
           try {
-            await this.scheduler.releaseResources(sbx.nodeId, state.vcpu, state.memoryMb);
+            await this.scheduler.releaseResources(sbx.sandboxId);
           } catch { /* fault injection */ }
         }
       }
@@ -391,7 +391,7 @@ export class SimulationWorld {
               if (tenant) {
                 try { await tenant.quota.release(state.vcpu, state.memoryMb); } catch { /**/ }
               }
-              try { await this.scheduler.releaseResources(sbx.nodeId, state.vcpu, state.memoryMb); } catch { /**/ }
+              try { await this.scheduler.releaseResources(sbx.sandboxId); } catch { /**/ }
             }
 
             this.eventLog.log({
